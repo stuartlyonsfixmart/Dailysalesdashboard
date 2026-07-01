@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fixmart Sales Orders · Charts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --lime: #9ACD00; --lime-dark: #7aaa00;
+    --black: #1a1a1a; --white: #fff;
+    --offwhite: #f5f5f3; --border: #e0e0e0;
+    --muted: #666; --surface: #fff; --grey: #b3b3b3; --ink: #3a3a3a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Barlow', sans-serif; background: var(--offwhite); color: var(--black); }
+
+  .header { background: var(--black); padding: 0 28px; display: flex; align-items: center; justify-content: space-between; height: 56px; position: sticky; top: 0; z-index: 100; border-bottom: 3px solid var(--lime); }
+  .header-left { display: flex; align-items: center; gap: 16px; }
+  .logo-img { height: 30px; width: auto; }
+  .header-div { width: 1px; height: 26px; background: rgba(255,255,255,0.15); }
+  .header-title { font-family: 'Barlow Condensed', sans-serif; font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.45); letter-spacing: 0.1em; text-transform: uppercase; }
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .last-updated { color: rgba(255,255,255,0.3); font-size: 11px; font-family: 'DM Mono', monospace; }
+  .logout-link { font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.4); text-decoration: none; text-transform: uppercase; letter-spacing: 0.08em; padding: 6px 12px; border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; }
+  .logout-link:hover { color: rgba(255,255,255,0.8); }
+
+  .nav { background: #111; padding: 0 28px; display: flex; border-bottom: 1px solid #333; }
+  .nav-link { font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.4); text-decoration: none; padding: 10px 16px; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 3px solid transparent; transition: all 0.15s; }
+  .nav-link:hover { color: rgba(255,255,255,0.7); }
+  .nav-link.active { color: var(--lime); border-bottom-color: var(--lime); }
+
+  .main { padding: 16px 24px; max-width: 1500px; margin: 0 auto; }
+
+  .filters-bar { background: var(--black); border-radius: 6px; padding: 10px 16px; display: flex; align-items: center; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
+  .filter-label { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 700; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.1em; white-space: nowrap; }
+  .filter-select { font-family: 'Barlow', sans-serif; font-size: 13px; font-weight: 500; color: #fff; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; padding: 4px 9px; cursor: pointer; outline: none; }
+  .filter-select option { background: #333; }
+  .filter-group { display: flex; align-items: center; gap: 7px; }
+  .filter-div { width: 1px; height: 20px; background: rgba(255,255,255,0.1); }
+  .toggle { display: flex; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; overflow: hidden; }
+  .toggle-btn { padding: 4px 12px; font-size: 12px; font-weight: 700; font-family: 'Barlow Condensed', sans-serif; letter-spacing: 0.05em; cursor: pointer; color: rgba(255,255,255,0.45); background: transparent; border: none; }
+  .toggle-btn.active { background: var(--lime); color: var(--black); }
+
+  .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px 6px; }
+  .chart-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 2px; }
+  .chart-title { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--black); }
+  .chart-headline { font-family: 'Barlow Condensed', sans-serif; font-size: 13px; font-weight: 700; color: var(--muted); }
+  .chart-headline .cy { color: var(--lime-dark); }
+  .chart-headline .up { color: #16a34a; }
+  .chart-headline .down { color: #dc2626; }
+  .chart-svg { width: 100%; height: 230px; display: block; }
+  .legend { display: flex; gap: 14px; margin-top: 2px; padding-left: 4px; }
+  .legend span { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 5px; }
+  .legend i { width: 14px; height: 2px; display: inline-block; border-radius: 2px; }
+
+  .loading { display: flex; align-items: center; justify-content: center; height: 300px; font-size: 13px; color: var(--muted); gap: 10px; }
+  .spinner { width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--lime); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .err { color: #dc2626; font-size: 13px; padding: 16px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <svg class="logo-img" viewBox="0 0 168 34" height="30" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Fixmart"><rect x="0" y="2" width="30" height="30" rx="7" fill="#9ACD00"/><text x="15" y="25" font-family="'Barlow Condensed',sans-serif" font-size="24" font-weight="800" fill="#1a1a1a" text-anchor="middle">f</text><text x="40" y="26" font-family="'Barlow Condensed',sans-serif" font-size="23" font-weight="800" letter-spacing="0.5" fill="#f5f5f3">fixmart</text></svg>
+    <div class="header-div"></div>
+    <div class="header-title">Sales Orders · Charts</div>
+  </div>
+  <div class="header-right">
+    <div class="last-updated" id="freshness">Loading…</div>
+    <a href="/logout" class="logout-link">Log out</a>
+  </div>
+</div>
+
+<div class="nav">
+  <a href="/index.html" class="nav-link" id="nav-table">Daily Table</a>
+  <a href="/charts.html" class="nav-link active" id="nav-charts">Charts</a>
+</div>
+
+<div class="main">
+
+  <div class="filters-bar">
+    <div class="filter-group">
+      <span class="filter-label">Period</span>
+      <div class="toggle" style="margin-right:4px">
+        <button class="toggle-btn active" id="preset-mtd" onclick="setMTD()">MTD</button>
+        <button class="toggle-btn" onclick="setPreset(4)">4w</button>
+        <button class="toggle-btn" onclick="setPreset(13)">13w</button>
+        <button class="toggle-btn" onclick="setPreset(26)">26w</button>
+        <button class="toggle-btn" onclick="setPreset(52)">52w</button>
+        <button class="toggle-btn" id="preset-ytd" onclick="setYTD()">YTD</button>
+      </div>
+    </div>
+    <div class="filter-div"></div>
+    <div class="filter-group">
+      <span class="filter-label">From</span>
+      <input type="date" class="filter-select" id="date-from" onchange="onDateChange()" style="cursor:pointer">
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">To</span>
+      <input type="date" class="filter-select" id="date-to" onchange="onDateChange()" style="cursor:pointer">
+    </div>
+    <div class="filter-div"></div>
+    <div class="filter-group">
+      <span class="filter-label">Sales Rep</span>
+      <select class="filter-select" id="rep-select" onchange="onRepChange()">
+        <option value="all">All reps</option>
+      </select>
+    </div>
+    <div class="filter-div"></div>
+    <div class="filter-group">
+      <span class="filter-label">Smooth 7d</span>
+      <div class="toggle"><button class="toggle-btn" id="smooth-btn" onclick="toggleSmooth()">Off</button></div>
+    </div>
+  </div>
+
+  <div id="content">
+    <div class="loading"><div class="spinner"></div> Loading from BigQuery…</div>
+  </div>
+
+</div>
+<script src="state.js"></script>
+<script src="charts.js"></script>
+</body>
+</html>
