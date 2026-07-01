@@ -75,6 +75,11 @@
   .spinner { width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--lime); border-radius: 50%; animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .err { color: #dc2626; font-size: 13px; padding: 16px; }
+
+  .nav { background: #111; padding: 0 28px; display: flex; border-bottom: 1px solid #333; }
+  .nav-link { font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.4); text-decoration: none; padding: 10px 16px; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 3px solid transparent; transition: all 0.15s; }
+  .nav-link:hover { color: rgba(255,255,255,0.7); }
+  .nav-link.active { color: var(--lime); border-bottom-color: var(--lime); }
 </style>
 </head>
 <body>
@@ -90,6 +95,12 @@
     <div class="last-updated" id="freshness">Loading…</div>
     <a href="/logout" class="logout-link">Log out</a>
   </div>
+</div>
+
+
+<div class="nav">
+  <a href="/index.html" class="nav-link active" id="nav-table">Daily Table</a>
+  <a href="/charts.html" class="nav-link" id="nav-charts">Charts</a>
 </div>
 
 <div class="main">
@@ -118,7 +129,7 @@
     <div class="filter-div"></div>
     <div class="filter-group">
       <span class="filter-label">Sales Rep</span>
-      <select class="filter-select" id="rep-select" onchange="load()">
+      <select class="filter-select" id="rep-select" onchange="onRepChange()">
         <option value="all">All reps</option>
       </select>
     </div>
@@ -137,6 +148,7 @@
   </div>
 
 </div>
+<script src="state.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
