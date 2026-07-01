@@ -1,0 +1,21 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'europe-west2-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/dailysalesdashboard', '.']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'europe-west2-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/dailysalesdashboard']
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'dailysalesdashboard'
+      - '--image'
+      - 'europe-west2-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/dailysalesdashboard'
+      - '--region'
+      - 'europe-west2'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--min-instances=1'
+images:
+  - 'europe-west2-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/dailysalesdashboard'
