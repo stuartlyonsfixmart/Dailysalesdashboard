@@ -96,8 +96,9 @@ app.get('/api/daily', async (req, res) => {
   const startDate = req.query.startDate || firstOfMonth;
   const endDate = req.query.endDate || today;
   const rep = req.query.rep && req.query.rep !== 'all' ? req.query.rep : null;
+  const compare = req.query.compare === '1'; // also return same span, prior year
 
-  const cacheKey = `daily_${startDate}_${endDate}_${rep || 'all'}`;
+  const cacheKey = `daily_${startDate}_${endDate}_${rep || 'all'}_${compare ? 'cmp' : 'no'}`;
   const cached = cache.get(cacheKey);
   if (cached) return res.json({ success: true, ...cached, cached: true });
 
@@ -140,12 +141,10 @@ app.get('/api/daily', async (req, res) => {
     'ORDER BY 1'
   ].join('\n');
 
-  const params = { startDate, endDate };
-  if (rep) params.rep = rep;
-
-  try {
+  const runOne = async (qStart, qEnd) => {
+    const params = { startDate: qStart, endDate: qEnd };
+    if (rep) params.rep = rep;
     const [rows] = await bigquery.query({ query, params, location: 'europe-west2' });
-    // Totals row respects the current filter + range.
     const totals = rows.reduce((t, r) => {
       t.orders += Number(r.orders) || 0;
       t.order_lines += Number(r.order_lines) || 0;
@@ -156,7 +155,19 @@ app.get('/api/daily', async (req, res) => {
       return t;
     }, { orders: 0, order_lines: 0, units: 0, weight_kg: 0, sales: 0, gp: 0 });
     totals.gp_pct = totals.sales ? Math.round((totals.gp / totals.sales) * 10000) / 100 : null;
-    const payload = { rows, totals, startDate, endDate, rep: rep || 'all' };
+    return { rows, totals };
+  };
+
+  const shiftYear = d => { const x = new Date(d + 'T00:00:00'); x.setFullYear(x.getFullYear() - 1); return x.toISOString().slice(0, 10); };
+
+  try {
+    const cy = await runOne(startDate, endDate);
+    const payload = { rows: cy.rows, totals: cy.totals, startDate, endDate, rep: rep || 'all' };
+    if (compare) {
+      const pyStart = shiftYear(startDate), pyEnd = shiftYear(endDate);
+      const py = await runOne(pyStart, pyEnd);
+      payload.pyRows = py.rows; payload.pyTotals = py.totals; payload.pyStart = pyStart; payload.pyEnd = pyEnd;
+    }
     cache.set(cacheKey, payload);
     res.json({ success: true, ...payload, cached: false });
   } catch (err) { console.error('Daily error:', err); res.status(500).json({ success: false, error: err.message }); }
