@@ -118,6 +118,22 @@ function scaffoldDays(rows, startDate, endDate) {
   return out;
 }
 
+// Zero-fill weekdays for the combined board (UK/DE/combined split shape).
+function scaffoldCombined(rows, startDate, endDate) {
+  const byDate = new Map(rows.map(r => [r.order_date, r]));
+  const out = [];
+  const cur = new Date(startDate + 'T00:00:00');
+  const end = new Date(endDate + 'T00:00:00');
+  while (cur <= end) {
+    const ds = isoLocal(cur);
+    const dow = cur.getDay();
+    if (byDate.has(ds)) out.push(byDate.get(ds));
+    else if (dow !== 0 && dow !== 6) out.push({ order_date: ds, uk_sales: 0, uk_gp: 0, de_sales: 0, de_gp: 0, sales: 0, gp: 0, gp_pct: null });
+    cur.setDate(cur.getDate() + 1);
+  }
+  return out;
+}
+
 // Flag weekdays in range that have zero orders and aren't bank holidays — these
 // are the "silently missing day" case (e.g. a load that didn't run). Today is
 // excluded, since the nightly load means the current day is legitimately partial.
@@ -297,9 +313,10 @@ app.get('/api/germany', async (req, res) => {
 });
 
 // ── Combined (UK + GmbH) daily board ────────────────────────────────────────
-// UK OrderWise (order date, order-book) plus GmbH Cin7 (invoice date), summed by
-// day. Sales / GP / GP% only. Bases differ (UK orders-taken vs GmbH invoiced) —
-// this is flagged on the tab. Working-days tile uses the UK (E&W) calendar.
+// UK OrderWise (order date, order-book) and GmbH Cin7 (invoice date), shown side
+// by side per day: UK sales/GP, Germany sales/GP, and the combined sales/GP/GP%.
+// Bases differ (UK orders-taken vs GmbH invoiced) — flagged on the tab. The
+// working-days tile uses the UK (E&W) calendar.
 app.get('/api/combined', async (req, res) => {
   const today = new Date().toISOString().slice(0, 10);
   const firstOfMonth = today.slice(0, 8) + '01';
@@ -329,19 +346,31 @@ app.get('/api/combined', async (req, res) => {
     '  WHERE DATE(invoice_date) BETWEEN @startDate AND @endDate',
     '  GROUP BY 1',
     ')',
-    'SELECT d AS order_date,',
-    '  ROUND(SUM(sales), 0) AS sales,',
-    '  ROUND(SUM(gp), 0) AS gp,',
-    '  ROUND(SAFE_DIVIDE(SUM(gp), SUM(sales)) * 100, 2) AS gp_pct',
-    'FROM (SELECT * FROM uk UNION ALL SELECT * FROM de)',
-    'GROUP BY 1 ORDER BY 1'
+    'SELECT COALESCE(uk.d, de.d) AS order_date,',
+    '  ROUND(COALESCE(uk.sales, 0), 0) AS uk_sales,',
+    '  ROUND(COALESCE(uk.gp, 0), 0) AS uk_gp,',
+    '  ROUND(COALESCE(de.sales, 0), 0) AS de_sales,',
+    '  ROUND(COALESCE(de.gp, 0), 0) AS de_gp,',
+    '  ROUND(COALESCE(uk.sales, 0) + COALESCE(de.sales, 0), 0) AS sales,',
+    '  ROUND(COALESCE(uk.gp, 0) + COALESCE(de.gp, 0), 0) AS gp,',
+    '  ROUND(SAFE_DIVIDE(COALESCE(uk.gp, 0) + COALESCE(de.gp, 0), COALESCE(uk.sales, 0) + COALESCE(de.sales, 0)) * 100, 2) AS gp_pct',
+    'FROM uk FULL OUTER JOIN de ON uk.d = de.d',
+    'ORDER BY 1'
   ].join('\n');
 
   try {
     const [rows] = await bigquery.query({ query, params: { startDate, endDate }, location: 'europe-west2' });
-    const totals = rows.reduce((t, r) => { t.sales += Number(r.sales) || 0; t.gp += Number(r.gp) || 0; return t; }, { sales: 0, gp: 0 });
+    const totals = rows.reduce((t, r) => {
+      t.uk_sales += Number(r.uk_sales) || 0;
+      t.uk_gp += Number(r.uk_gp) || 0;
+      t.de_sales += Number(r.de_sales) || 0;
+      t.de_gp += Number(r.de_gp) || 0;
+      t.sales += Number(r.sales) || 0;
+      t.gp += Number(r.gp) || 0;
+      return t;
+    }, { uk_sales: 0, uk_gp: 0, de_sales: 0, de_gp: 0, sales: 0, gp: 0 });
     totals.gp_pct = totals.sales ? Math.round((totals.gp / totals.sales) * 10000) / 100 : null;
-    const payload = { rows: scaffoldDays(rows, startDate, endDate), totals, workingDays: workingDaysTile(endDate, 'uk'), zeroWeekdays: zeroWeekdayFlags(rows, startDate, endDate, 'uk'), startDate, endDate };
+    const payload = { rows: scaffoldCombined(rows, startDate, endDate), totals, workingDays: workingDaysTile(endDate, 'uk'), zeroWeekdays: zeroWeekdayFlags(rows, startDate, endDate, 'uk'), startDate, endDate };
     cache.set(cacheKey, payload);
     res.json({ success: true, ...payload, cached: false });
   } catch (err) { console.error('Combined error:', err); res.status(500).json({ success: false, error: err.message }); }
