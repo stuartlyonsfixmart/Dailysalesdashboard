@@ -10,7 +10,8 @@ const pctDelta = (cy, py) => (py ? Math.round(((cy - py) / py) * 1000) / 10 : nu
 // ── State / nav ────────────────────────────────────────────────────────────────
 let SMOOTH = false;
 function persist() { FilterState.set({ from: $('date-from').value, to: $('date-to').value, rep: $('rep-select').value, smooth: SMOOTH }); syncNav(); }
-function syncNav() { const t = $('nav-table'); if (t) t.href = FilterState.href('/index.html'); const c = $('nav-charts'); if (c) c.href = FilterState.href('/charts.html'); }
+function syncNav() { const t = $('nav-table'); if (t) t.href = FilterState.href('/index.html');
+  const g = $('nav-germany'); if (g) g.href = FilterState.href('/germany.html'); const c = $('nav-charts'); if (c) c.href = FilterState.href('/charts.html'); }
 function clearPresets() { document.querySelectorAll('.toggle:first-of-type .toggle-btn, #preset-mtd, #preset-ytd').forEach(b => b.classList.remove('active')); }
 function setMTD() { clearPresets(); $('preset-mtd').classList.add('active'); const m = FilterState.mtd(); $('date-from').value = m.from; $('date-to').value = m.to; persist(); loadCharts(); }
 function setYTD() { clearPresets(); $('preset-ytd').classList.add('active'); const n = new Date(); $('date-from').value = iso(new Date(n.getFullYear(), 0, 1)); $('date-to').value = iso(n); persist(); loadCharts(); }
