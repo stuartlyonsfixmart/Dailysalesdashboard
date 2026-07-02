@@ -1,4 +1,5 @@
-// Fixmart Sales Orders — Combined (UK + GmbH) tab. Sales / GP / GP% by day.
+// Fixmart Sales Orders — Combined (UK + GmbH) tab.
+// UK sales/GP, Germany sales/GP, and the combined sales/GP/GP% per day.
 
 const $ = id => document.getElementById(id);
 const fmtGBP = n => (n == null ? '—' : '£' + Math.round(n).toLocaleString('en-GB'));
@@ -91,8 +92,8 @@ function workingDaysCard(wd, note) {
 function renderSparks(rows, totals, wd) {
   const d = rows;
   const cards = [
-    { t: 'Sales', v: shortGBP(totals.sales), s: d.map(r => Number(r.sales) || 0) },
-    { t: 'Gross Profit', v: shortGBP(totals.gp) + ' <small>' + fmtPct(totals.gp_pct) + '</small>', s: d.map(r => Number(r.gp) || 0) }
+    { t: 'Combined Sales', v: shortGBP(totals.sales), s: d.map(r => Number(r.sales) || 0) },
+    { t: 'Combined GP', v: shortGBP(totals.gp) + ' <small>' + fmtPct(totals.gp_pct) + '</small>', s: d.map(r => Number(r.gp) || 0) }
   ];
   $('sparks').innerHTML = workingDaysCard(wd, 'excl. E&W bank hols') + cards.map(c => `
     <div class="spark-card"><div class="spark-title">${c.t}</div>
@@ -123,15 +124,33 @@ function renderTable(rows, totals, zeroDays) {
     const missing = zero.has(r.order_date) ? ' missing-day' : '';
     return `<tr class="${weekend}${missing}">
       <td class="date">${fmtDate(r.order_date)} <span class="dow">${DOW[dow]}</span></td>
-      <td class="right mono">${fmtGBP(r.sales)}</td>
+      <td class="right mono">${fmtGBP(r.uk_sales)}</td>
+      <td class="right mono">${fmtGBP(r.uk_gp)}</td>
+      <td class="right mono sep">${fmtGBP(r.de_sales)}</td>
+      <td class="right mono">${fmtGBP(r.de_gp)}</td>
+      <td class="right mono sep">${fmtGBP(r.sales)}</td>
       <td class="right mono">${fmtGBP(r.gp)}</td>
       <td class="right mono">${fmtPct(r.gp_pct)}</td></tr>`;
   }).join('');
   $('content').innerHTML = `<div class="table-scroll"><table class="data-table">
-    <thead><tr><th>Date</th><th class="right">Sales</th><th class="right">GP</th><th class="right">GP %</th></tr></thead>
+    <thead>
+      <tr class="grp-row">
+        <th rowspan="2">Date</th>
+        <th colspan="2" class="grp">UK</th>
+        <th colspan="2" class="grp sep">Germany (GmbH)</th>
+        <th colspan="3" class="grp sep">Combined</th>
+      </tr>
+      <tr>
+        <th class="right">Sales</th><th class="right">GP</th>
+        <th class="right sep">Sales</th><th class="right">GP</th>
+        <th class="right sep">Sales</th><th class="right">GP</th><th class="right">GP %</th>
+      </tr>
+    </thead>
     <tbody>${body}</tbody>
     <tfoot><tr class="total-row"><td>Total</td>
-      <td class="right lime">${fmtGBP(totals.sales)}</td><td class="right lime">${fmtGBP(totals.gp)}</td>
+      <td class="right">${fmtGBP(totals.uk_sales)}</td><td class="right">${fmtGBP(totals.uk_gp)}</td>
+      <td class="right sep">${fmtGBP(totals.de_sales)}</td><td class="right">${fmtGBP(totals.de_gp)}</td>
+      <td class="right lime sep">${fmtGBP(totals.sales)}</td><td class="right lime">${fmtGBP(totals.gp)}</td>
       <td class="right lime">${fmtPct(totals.gp_pct)}</td></tr></tfoot></table></div>`;
 }
 
