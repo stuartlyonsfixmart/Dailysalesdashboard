@@ -58,11 +58,12 @@ const P = PROJECT_ID;
 const bigquery = new BigQuery({ projectId: PROJECT_ID });
 const cache = new NodeCache({ stdTTL: 900 }); // 15 min; OrderWise loads nightly anyway
 
-// Valid sales order types (matches transport-mi and the management orders board)
-const SOT = '1,4,8,9,11';
+// Valid sales order types — matches the OrderWise "Top N Customers by Sales Net"
+// report (10-0028-001). Type 11 is deliberately excluded, as per the report.
+const SOT = '1,4,8,9';
 
-// Sign flip for credits (sot 4), same as commercials_header_vw
-const SIGN = 'CASE WHEN oh.oh_sot_id = 4 THEN -1 ELSE 1 END';
+// Sign flip for credits — the report negates both sot 4 and sot 9.
+const SIGN = 'CASE WHEN oh.oh_sot_id IN (4, 9) THEN -1 ELSE 1 END';
 
 // Public holidays (date-only). uk = England & Wales; de = Hesse (Frankfurt/GmbH).
 // Germany has no substitute-day rule, so weekend holidays are simply listed as-is.
@@ -112,6 +113,25 @@ function scaffoldDays(rows, startDate, endDate) {
     const dow = cur.getDay();
     if (byDate.has(ds)) out.push(byDate.get(ds));
     else if (dow !== 0 && dow !== 6) out.push({ order_date: ds, orders: 0, order_lines: 0, units: 0, weight_kg: 0, sales: 0, gp: 0, gp_pct: null });
+    cur.setDate(cur.getDate() + 1);
+  }
+  return out;
+}
+
+// Flag weekdays in range that have zero orders and aren't bank holidays — these
+// are the "silently missing day" case (e.g. a load that didn't run). Today is
+// excluded, since the nightly load means the current day is legitimately partial.
+function zeroWeekdayFlags(rows, startDate, endDate, country) {
+  const hol = HOLIDAYS[country] || HOLIDAYS.uk;
+  const hasOrders = new Set(rows.filter(r => Number(r.orders) > 0).map(r => r.order_date));
+  const todayStr = isoLocal(new Date());
+  const out = [];
+  const cur = new Date(startDate + 'T00:00:00');
+  const end = new Date(endDate + 'T00:00:00');
+  while (cur <= end) {
+    const ds = isoLocal(cur);
+    const dow = cur.getDay();
+    if (dow !== 0 && dow !== 6 && !hol.has(ds) && ds < todayStr && !hasOrders.has(ds)) out.push(ds);
     cur.setDate(cur.getDate() + 1);
   }
   return out;
@@ -215,7 +235,8 @@ app.get('/api/daily', async (req, res) => {
 
   try {
     const cy = await runOne(startDate, endDate);
-    const payload = { rows: scaffoldDays(cy.rows, startDate, endDate), totals: cy.totals, workingDays: workingDaysTile(endDate, 'uk'), startDate, endDate, rep: rep || 'all' };
+    const scaffolded = scaffoldDays(cy.rows, startDate, endDate);
+    const payload = { rows: scaffolded, totals: cy.totals, workingDays: workingDaysTile(endDate, 'uk'), zeroWeekdays: zeroWeekdayFlags(cy.rows, startDate, endDate, 'uk'), startDate, endDate, rep: rep || 'all' };
     if (compare) {
       const pyStart = shiftYear(startDate), pyEnd = shiftYear(endDate);
       const py = await runOne(pyStart, pyEnd);
