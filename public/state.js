@@ -2,7 +2,7 @@
 // Fresh open (no params) => MTD. Changing the range updates the URL so the
 // nav links to the other tab carry the same selection.
 (function () {
-  const iso = d => d.toISOString().slice(0, 10);
+  const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   function mtd() {
     const now = new Date();
     return { from: iso(new Date(now.getFullYear(), now.getMonth(), 1)), to: iso(now) };
