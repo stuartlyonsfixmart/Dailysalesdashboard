@@ -30,6 +30,7 @@ function syncNav() {
   const c = $('nav-charts'); if (c) c.href = FilterState.href('/charts.html');
   const t = $('nav-table'); if (t) t.href = FilterState.href('/index.html');
   const g = $('nav-germany'); if (g) g.href = FilterState.href('/germany.html');
+  const b = $('nav-combined'); if (b) b.href = FilterState.href('/combined.html');
 }
 function clearPresets() { document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active')); }
 
