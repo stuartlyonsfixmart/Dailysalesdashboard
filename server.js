@@ -123,7 +123,7 @@ function scaffoldDays(rows, startDate, endDate) {
 // excluded, since the nightly load means the current day is legitimately partial.
 function zeroWeekdayFlags(rows, startDate, endDate, country) {
   const hol = HOLIDAYS[country] || HOLIDAYS.uk;
-  const hasOrders = new Set(rows.filter(r => Number(r.orders) > 0).map(r => r.order_date));
+  const hasOrders = new Set(rows.filter(r => Number(r.orders) > 0 || Number(r.sales) !== 0).map(r => r.order_date));
   const todayStr = isoLocal(new Date());
   const out = [];
   const cur = new Date(startDate + 'T00:00:00');
@@ -294,6 +294,57 @@ app.get('/api/germany', async (req, res) => {
     cache.set(cacheKey, payload);
     res.json({ success: true, ...payload, cached: false });
   } catch (err) { console.error('Germany error:', err); res.status(500).json({ success: false, error: err.message }); }
+});
+
+// ── Combined (UK + GmbH) daily board ────────────────────────────────────────
+// UK OrderWise (order date, order-book) plus GmbH Cin7 (invoice date), summed by
+// day. Sales / GP / GP% only. Bases differ (UK orders-taken vs GmbH invoiced) —
+// this is flagged on the tab. Working-days tile uses the UK (E&W) calendar.
+app.get('/api/combined', async (req, res) => {
+  const today = new Date().toISOString().slice(0, 10);
+  const firstOfMonth = today.slice(0, 8) + '01';
+  const startDate = req.query.startDate || firstOfMonth;
+  const endDate = req.query.endDate || today;
+
+  const cacheKey = `combined_${startDate}_${endDate}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return res.json({ success: true, ...cached, cached: true });
+
+  const query = [
+    'WITH uk AS (',
+    '  SELECT FORMAT_DATE(\'%Y-%m-%d\', oh.oh_datetime) AS d,',
+    '    SUM(' + SIGN + ' * oht.oht_net) AS sales,',
+    '    SUM(' + SIGN + ' * oht.oht_total_margin) AS gp',
+    '  FROM `' + P + '.fixmart_bi.order_header` oh',
+    '  JOIN `' + P + '.fixmart_bi.Order_Header_Total` oht ON oht.oht_oh_id = oh.oh_id',
+    '  WHERE oh.oh_datetime BETWEEN @startDate AND @endDate',
+    '    AND oh.oh_sot_id IN (' + SOT + ')',
+    '  GROUP BY 1',
+    '),',
+    'de AS (',
+    '  SELECT FORMAT_DATE(\'%Y-%m-%d\', DATE(invoice_date)) AS d,',
+    '    SUM(sale_value_gbp) AS sales,',
+    '    SUM(profit_amount_gbp) AS gp',
+    '  FROM `' + P + '.cin7.v_cin7_sale_profit_summary_gbp`',
+    '  WHERE DATE(invoice_date) BETWEEN @startDate AND @endDate',
+    '  GROUP BY 1',
+    ')',
+    'SELECT d AS order_date,',
+    '  ROUND(SUM(sales), 0) AS sales,',
+    '  ROUND(SUM(gp), 0) AS gp,',
+    '  ROUND(SAFE_DIVIDE(SUM(gp), SUM(sales)) * 100, 2) AS gp_pct',
+    'FROM (SELECT * FROM uk UNION ALL SELECT * FROM de)',
+    'GROUP BY 1 ORDER BY 1'
+  ].join('\n');
+
+  try {
+    const [rows] = await bigquery.query({ query, params: { startDate, endDate }, location: 'europe-west2' });
+    const totals = rows.reduce((t, r) => { t.sales += Number(r.sales) || 0; t.gp += Number(r.gp) || 0; return t; }, { sales: 0, gp: 0 });
+    totals.gp_pct = totals.sales ? Math.round((totals.gp / totals.sales) * 10000) / 100 : null;
+    const payload = { rows: scaffoldDays(rows, startDate, endDate), totals, workingDays: workingDaysTile(endDate, 'uk'), zeroWeekdays: zeroWeekdayFlags(rows, startDate, endDate, 'uk'), startDate, endDate };
+    cache.set(cacheKey, payload);
+    res.json({ success: true, ...payload, cached: false });
+  } catch (err) { console.error('Combined error:', err); res.status(500).json({ success: false, error: err.message }); }
 });
 
 // Freshness — last order_header load, so the header can show "data as of".
