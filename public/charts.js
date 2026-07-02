@@ -1,7 +1,7 @@
 // Fixmart Sales Orders — charts tab
 
 const $ = id => document.getElementById(id);
-const iso = d => d.toISOString().slice(0, 10);
+const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const fmtGBP = n => (n == null ? '—' : '£' + Math.round(n).toLocaleString('en-GB'));
 function shortGBP(n) { if (n == null) return '—'; const a = Math.abs(n); if (a >= 1e6) return '£' + (n / 1e6).toFixed(2) + 'm'; if (a >= 1e3) return '£' + Math.round(n / 1e3) + 'k'; return '£' + Math.round(n); }
 function shortNum(n) { if (n == null) return '—'; const a = Math.abs(n); if (a >= 1e6) return (n / 1e6).toFixed(2) + 'm'; if (a >= 1e3) return Math.round(n / 1e3) + 'k'; return Math.round(n).toString(); }
