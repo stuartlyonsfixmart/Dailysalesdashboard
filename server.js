@@ -64,6 +64,59 @@ const SOT = '1,4,8,9,11';
 // Sign flip for credits (sot 4), same as commercials_header_vw
 const SIGN = 'CASE WHEN oh.oh_sot_id = 4 THEN -1 ELSE 1 END';
 
+// Public holidays (date-only). uk = England & Wales; de = Hesse (Frankfurt/GmbH).
+// Germany has no substitute-day rule, so weekend holidays are simply listed as-is.
+const HOLIDAYS = {
+  uk: new Set([
+    '2025-01-01', '2025-04-18', '2025-04-21', '2025-05-05', '2025-05-26', '2025-08-25', '2025-12-25', '2025-12-26',
+    '2026-01-01', '2026-04-03', '2026-04-06', '2026-05-04', '2026-05-25', '2026-08-31', '2026-12-25', '2026-12-28'
+  ]),
+  de: new Set([
+    '2025-01-01', '2025-04-18', '2025-04-21', '2025-05-01', '2025-05-29', '2025-06-09', '2025-06-19', '2025-10-03', '2025-12-25', '2025-12-26',
+    '2026-01-01', '2026-04-03', '2026-04-06', '2026-05-01', '2026-05-14', '2026-05-25', '2026-06-04', '2026-10-03', '2026-12-25', '2026-12-26'
+  ])
+};
+
+const isoLocal = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+// Working days in the month of endDate: elapsed (to endDate, capped at today) and total.
+// Working day = Mon-Fri minus the relevant country's public holidays.
+function workingDaysTile(endDate, country) {
+  const hol = HOLIDAYS[country] || HOLIDAYS.uk;
+  const end = new Date(endDate + 'T00:00:00');
+  const y = end.getFullYear(), m = end.getMonth();
+  const todayStr = isoLocal(new Date());
+  const lastDay = new Date(y, m + 1, 0).getDate();
+  let total = 0, elapsed = 0;
+  for (let day = 1; day <= lastDay; day++) {
+    const d = new Date(y, m, day);
+    const dow = d.getDay();
+    const ds = isoLocal(d);
+    if (dow !== 0 && dow !== 6 && !hol.has(ds)) {
+      total++;
+      if (ds <= endDate && ds <= todayStr) elapsed++;
+    }
+  }
+  return { elapsed, total, month: `${y}-${String(m + 1).padStart(2, '0')}` };
+}
+
+// Show every weekday in [start,end] as a row (zero-filled where no orders);
+// keep weekends only when they actually carry orders. Totals are unaffected.
+function scaffoldDays(rows, startDate, endDate) {
+  const byDate = new Map(rows.map(r => [r.order_date, r]));
+  const out = [];
+  const cur = new Date(startDate + 'T00:00:00');
+  const end = new Date(endDate + 'T00:00:00');
+  while (cur <= end) {
+    const ds = isoLocal(cur);
+    const dow = cur.getDay();
+    if (byDate.has(ds)) out.push(byDate.get(ds));
+    else if (dow !== 0 && dow !== 6) out.push({ order_date: ds, orders: 0, order_lines: 0, units: 0, weight_kg: 0, sales: 0, gp: 0, gp_pct: null });
+    cur.setDate(cur.getDate() + 1);
+  }
+  return out;
+}
+
 // ── Sales rep dropdown ──────────────────────────────────────────────────────
 app.get('/api/reps', async (req, res) => {
   const cacheKey = 'reps';
@@ -162,7 +215,7 @@ app.get('/api/daily', async (req, res) => {
 
   try {
     const cy = await runOne(startDate, endDate);
-    const payload = { rows: cy.rows, totals: cy.totals, startDate, endDate, rep: rep || 'all' };
+    const payload = { rows: scaffoldDays(cy.rows, startDate, endDate), totals: cy.totals, workingDays: workingDaysTile(endDate, 'uk'), startDate, endDate, rep: rep || 'all' };
     if (compare) {
       const pyStart = shiftYear(startDate), pyEnd = shiftYear(endDate);
       const py = await runOne(pyStart, pyEnd);
@@ -175,9 +228,9 @@ app.get('/api/daily', async (req, res) => {
 
 // ── Germany (GmbH) daily board ──────────────────────────────────────────────
 // Cin7 invoiced orders, converted to GBP via v_cin7_sale_profit_summary_gbp.
-// Header-level source, so order_lines / units / weight are not available and
-// come back as 0 (gaps filled with zero). Fills in automatically as the Cin7
-// load backfills the order book.
+// Keyed on invoice_date (the invoiced-orders basis). Header-level source, so
+// order_lines / units / weight are not available and come back as 0 (gaps
+// filled with zero). Fills in automatically as the Cin7 load backfills.
 app.get('/api/germany', async (req, res) => {
   const today = new Date().toISOString().slice(0, 10);
   const firstOfMonth = today.slice(0, 8) + '01';
@@ -190,7 +243,7 @@ app.get('/api/germany', async (req, res) => {
 
   const query = [
     'SELECT',
-    '  FORMAT_DATE(\'%Y-%m-%d\', DATE(order_date)) AS order_date',
+    '  FORMAT_DATE(\'%Y-%m-%d\', DATE(invoice_date)) AS order_date',
     ', COUNT(DISTINCT sale_id) AS orders',
     ', 0 AS order_lines',
     ', 0 AS units',
@@ -199,7 +252,7 @@ app.get('/api/germany', async (req, res) => {
     ', ROUND(SUM(profit_amount_gbp), 0) AS gp',
     ', ROUND(SAFE_DIVIDE(SUM(profit_amount_gbp), SUM(sale_value_gbp)) * 100, 2) AS gp_pct',
     'FROM `' + P + '.cin7.v_cin7_sale_profit_summary_gbp`',
-    'WHERE DATE(order_date) BETWEEN @startDate AND @endDate',
+    'WHERE DATE(invoice_date) BETWEEN @startDate AND @endDate',
     'GROUP BY 1',
     'ORDER BY 1'
   ].join('\n');
@@ -216,7 +269,7 @@ app.get('/api/germany', async (req, res) => {
       return t;
     }, { orders: 0, order_lines: 0, units: 0, weight_kg: 0, sales: 0, gp: 0 });
     totals.gp_pct = totals.sales ? Math.round((totals.gp / totals.sales) * 10000) / 100 : null;
-    const payload = { rows, totals, startDate, endDate };
+    const payload = { rows: scaffoldDays(rows, startDate, endDate), totals, workingDays: workingDaysTile(endDate, 'de'), startDate, endDate };
     cache.set(cacheKey, payload);
     res.json({ success: true, ...payload, cached: false });
   } catch (err) { console.error('Germany error:', err); res.status(500).json({ success: false, error: err.message }); }
