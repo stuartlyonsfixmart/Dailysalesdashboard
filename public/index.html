@@ -76,6 +76,11 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .err { color: #dc2626; font-size: 13px; padding: 16px; }
 
+  .warn-banner { background: #fff8e1; border: 1px solid #f0c000; border-left: 3px solid #f0a000; color: #6b5300; font-size: 12.5px; line-height: 1.5; padding: 9px 14px; border-radius: 6px; margin-bottom: 12px; }
+  .warn-banner strong { color: #8a4b00; }
+  .data-table tbody tr.missing-day td { background: #fff3cd !important; color: #8a6d00; }
+  .data-table tbody tr.missing-day td.date::after { content: ' \26A0'; color: #d08700; }
+
   .nav { background: #111; padding: 0 28px; display: flex; border-bottom: 1px solid #333; }
   .nav-link { font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.4); text-decoration: none; padding: 10px 16px; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 3px solid transparent; transition: all 0.15s; }
   .nav-link:hover { color: rgba(255,255,255,0.7); }
@@ -137,6 +142,8 @@
   </div>
 
   <div class="sparks" id="sparks"></div>
+
+  <div id="warnings" class="warn-banner" style="display:none"></div>
 
   <div class="table-bar">
     <div class="table-bar-title">Daily Orders Taken</div>
