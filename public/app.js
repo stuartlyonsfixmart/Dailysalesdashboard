@@ -99,16 +99,29 @@ function renderSparks(rows, totals, wd) {
       <div class="spark-val">${c.v}</div>${sparkline(c.s)}</div>`).join('');
 }
 
+function renderWarnings(zeroDays) {
+  const el = $('warnings');
+  if (!el) return;
+  if (!zeroDays.length) { el.innerHTML = ''; el.style.display = 'none'; return; }
+  const shown = zeroDays.map(d => { const p = d.split('-'); return p[2] + '/' + p[1]; });
+  const label = shown.length === 1 ? 'weekday has' : 'weekdays have';
+  el.innerHTML = '<strong>Data may be incomplete.</strong> ' + shown.length + ' ' + label +
+    ' zero orders (' + shown.join(', ') + '). A trading day with no orders usually means that day did not load from OrderWise.';
+  el.style.display = 'block';
+}
+
 // ── Table ──────────────────────────────────────────────────────────────────────
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const fmtDate = s => { const p = s.split('-'); return `${p[2]}/${p[1]}/${p[0]}`; };
 
-function renderTable(rows, totals) {
+function renderTable(rows, totals, zeroDays) {
+  const zero = new Set(zeroDays || []);
   if (!rows.length) { $('content').innerHTML = '<div class="err">No orders in this range.</div>'; return; }
   const body = rows.map(r => {
     const dow = new Date(r.order_date + 'T00:00:00').getDay();
     const weekend = (dow === 0 || dow === 6) ? ' weekend' : '';
-    return `<tr class="${weekend}">
+    const missing = zero.has(r.order_date) ? ' missing-day' : '';
+    return `<tr class="${weekend}${missing}">
       <td class="date">${fmtDate(r.order_date)} <span class="dow">${DOW[dow]}</span></td>
       <td class="right mono">${fmtInt(r.orders)}</td>
       <td class="right mono">${fmtInt(r.order_lines)}</td>
@@ -140,7 +153,8 @@ async function load() {
     const j = await r.json();
     if (!j.success) throw new Error(j.error || 'Query failed');
     renderSparks(j.rows, j.totals, j.workingDays);
-    renderTable(j.rows, j.totals);
+    renderWarnings(j.zeroWeekdays || []);
+    renderTable(j.rows, j.totals, j.zeroWeekdays || []);
     $('table-count').textContent = `${j.rows.length} days · ${rep === 'all' ? 'all reps' : rep}`;
   } catch (e) {
     $('content').innerHTML = `<div class="err">Error: ${e.message}</div>`;
