@@ -173,6 +173,55 @@ app.get('/api/daily', async (req, res) => {
   } catch (err) { console.error('Daily error:', err); res.status(500).json({ success: false, error: err.message }); }
 });
 
+// ── Germany (GmbH) daily board ──────────────────────────────────────────────
+// Cin7 invoiced orders, converted to GBP via v_cin7_sale_profit_summary_gbp.
+// Header-level source, so order_lines / units / weight are not available and
+// come back as 0 (gaps filled with zero). Fills in automatically as the Cin7
+// load backfills the order book.
+app.get('/api/germany', async (req, res) => {
+  const today = new Date().toISOString().slice(0, 10);
+  const firstOfMonth = today.slice(0, 8) + '01';
+  const startDate = req.query.startDate || firstOfMonth;
+  const endDate = req.query.endDate || today;
+
+  const cacheKey = `germany_${startDate}_${endDate}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return res.json({ success: true, ...cached, cached: true });
+
+  const query = [
+    'SELECT',
+    '  FORMAT_DATE(\'%Y-%m-%d\', DATE(order_date)) AS order_date',
+    ', COUNT(DISTINCT sale_id) AS orders',
+    ', 0 AS order_lines',
+    ', 0 AS units',
+    ', 0 AS weight_kg',
+    ', ROUND(SUM(sale_value_gbp), 0) AS sales',
+    ', ROUND(SUM(profit_amount_gbp), 0) AS gp',
+    ', ROUND(SAFE_DIVIDE(SUM(profit_amount_gbp), SUM(sale_value_gbp)) * 100, 2) AS gp_pct',
+    'FROM `' + P + '.cin7.v_cin7_sale_profit_summary_gbp`',
+    'WHERE DATE(order_date) BETWEEN @startDate AND @endDate',
+    'GROUP BY 1',
+    'ORDER BY 1'
+  ].join('\n');
+
+  try {
+    const [rows] = await bigquery.query({ query, params: { startDate, endDate }, location: 'europe-west2' });
+    const totals = rows.reduce((t, r) => {
+      t.orders += Number(r.orders) || 0;
+      t.order_lines += Number(r.order_lines) || 0;
+      t.units += Number(r.units) || 0;
+      t.weight_kg += Number(r.weight_kg) || 0;
+      t.sales += Number(r.sales) || 0;
+      t.gp += Number(r.gp) || 0;
+      return t;
+    }, { orders: 0, order_lines: 0, units: 0, weight_kg: 0, sales: 0, gp: 0 });
+    totals.gp_pct = totals.sales ? Math.round((totals.gp / totals.sales) * 10000) / 100 : null;
+    const payload = { rows, totals, startDate, endDate };
+    cache.set(cacheKey, payload);
+    res.json({ success: true, ...payload, cached: false });
+  } catch (err) { console.error('Germany error:', err); res.status(500).json({ success: false, error: err.message }); }
+});
+
 // Freshness — last order_header load, so the header can show "data as of".
 app.get('/api/freshness', async (req, res) => {
   const cacheKey = 'freshness';
