@@ -4,7 +4,7 @@ const $ = id => document.getElementById(id);
 const fmtInt = n => (n == null ? '—' : Math.round(n).toLocaleString('en-GB'));
 const fmtGBP = n => (n == null ? '—' : '£' + Math.round(n).toLocaleString('en-GB'));
 const fmtPct = n => (n == null ? '—' : Number(n).toFixed(1) + '%');
-const iso = d => d.toISOString().slice(0, 10);
+const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 function shortGBP(n) {
   if (n == null) return '—';
@@ -71,7 +71,21 @@ function sparkline(values) {
     <polyline fill="none" stroke="#9ACD00" stroke-width="1.6" points="${pts}"/>
     <circle cx="${lastX}" cy="${lastY}" r="2.2" fill="#9ACD00"/></svg>`;
 }
-function renderSparks(rows, totals) {
+function workingDaysCard(wd, note) {
+  if (!wd) return '';
+  const pct = wd.total ? Math.round((wd.elapsed / wd.total) * 100) : 0;
+  const parts = wd.month.split('-');
+  const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(parts[1]) - 1];
+  return `<div class="spark-card">
+    <div class="spark-title">Working Days · ${mon} ${parts[0]}</div>
+    <div class="spark-val">${wd.elapsed} <small>/ ${wd.total}</small></div>
+    <div style="font-size:10px;color:var(--muted);margin-top:4px;">elapsed / total · ${note}</div>
+    <div style="margin-top:8px;height:6px;background:#ececec;border-radius:3px;overflow:hidden;">
+      <div style="height:100%;width:${pct}%;background:#9ACD00;"></div>
+    </div>
+  </div>`;
+}
+function renderSparks(rows, totals, wd) {
   const d = rows;
   const cards = [
     { t: 'Sales', v: shortGBP(totals.sales), s: d.map(r => Number(r.sales) || 0) },
@@ -79,7 +93,7 @@ function renderSparks(rows, totals) {
     { t: 'Units', v: shortNum(totals.units), s: d.map(r => Number(r.units) || 0) },
     { t: 'Weight', v: shortNum(totals.weight_kg) + ' <small>kg</small>', s: d.map(r => Number(r.weight_kg) || 0) }
   ];
-  $('sparks').innerHTML = cards.map(c => `
+  $('sparks').innerHTML = workingDaysCard(wd, 'excl. Hesse public hols') + cards.map(c => `
     <div class="spark-card"><div class="spark-title">${c.t}</div>
       <div class="spark-val">${c.v}</div>${sparkline(c.s)}</div>`).join('');
 }
@@ -124,7 +138,7 @@ async function load() {
     const r = await fetch(`/api/germany?startDate=${from}&endDate=${to}`);
     const j = await r.json();
     if (!j.success) throw new Error(j.error || 'Query failed');
-    renderSparks(j.rows, j.totals);
+    renderSparks(j.rows, j.totals, j.workingDays);
     renderTable(j.rows, j.totals);
     $('table-count').textContent = `${j.rows.length} days · GmbH (EUR→GBP)`;
   } catch (e) {
