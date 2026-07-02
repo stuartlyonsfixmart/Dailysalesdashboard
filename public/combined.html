@@ -70,6 +70,12 @@
   .data-table tfoot td.right { text-align: right; }
   .data-table tfoot td.lime { color: var(--lime); }
 
+  /* Grouped columns (UK / Germany / Combined) */
+  .data-table thead tr.grp-row th { border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+  .data-table thead th.grp { text-align: center; color: var(--muted); font-size: 10px; letter-spacing: 0.09em; }
+  .data-table th.sep, .data-table td.sep { border-left: 1px solid var(--border); }
+  .data-table tfoot td.sep { border-left: 1px solid rgba(255,255,255,0.18); }
+
   .loading { display: flex; align-items: center; justify-content: center; height: 180px; font-size: 13px; color: var(--muted); gap: 10px; }
   .spinner { width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--lime); border-radius: 50%; animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
