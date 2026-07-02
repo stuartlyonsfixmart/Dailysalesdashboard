@@ -44,6 +44,19 @@ function setPreset(weeks) {
   persist(); load();
 }
 function onDateChange() { clearPresets(); persist(); load(); }
+function syncMonth() { const f = $('date-from').value; const el = $('month-select'); if (el && f) el.value = f.slice(0, 7); }
+function onMonthChange() {
+  const v = $('month-select').value; // YYYY-MM
+  if (!v) return;
+  const [y, m] = v.split('-').map(Number);
+  const lastDom = new Date(y, m, 0).getDate();
+  const last = `${v}-${String(lastDom).padStart(2, '0')}`;
+  const todayStr = iso(new Date());
+  $('date-from').value = `${v}-01`;
+  $('date-to').value = last > todayStr ? todayStr : last; // cap current month at today
+  clearPresets();
+  persist(); load();
+}
 
 // ── Sparklines ──────────────────────────────────────────────────────────────────
 function sparkline(values) {
@@ -125,6 +138,7 @@ function renderTable(rows, totals, zeroDays) {
 async function load() {
   const from = $('date-from').value, to = $('date-to').value;
   if (!from || !to) return;
+  syncMonth();
   $('content').innerHTML = '<div class="loading"><div class="spinner"></div> Loading from BigQuery…</div>';
   $('table-count').textContent = 'Loading…';
   try {
@@ -156,6 +170,7 @@ async function loadFreshness() {
   $('date-from').value = s.from; $('date-to').value = s.to;
   clearPresets();
   if (FilterState.isMTD()) $('preset-mtd').classList.add('active');
+  syncMonth();
   syncNav();
   loadFreshness();
   load();
