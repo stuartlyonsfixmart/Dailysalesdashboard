@@ -32,65 +32,112 @@ function rolling(vals, w) {
   return out;
 }
 
-// ── Chart primitives (Tufte: zero baseline, one max gridline, direct labels) ─────
-const W = 620, H = 230, PADT = 16, PADB = 24;
-function xLabels(dates, x) {
-  const idx = [0, Math.floor((dates.length - 1) / 2), dates.length - 1].filter((v, i, a) => a.indexOf(v) === i);
-  return idx.map(i => { const p = dates[i].split('-'); return `<text x="${x(i).toFixed(1)}" y="${H - 6}" font-size="10" fill="#999" text-anchor="middle" font-family="'DM Mono',monospace">${p[2]}/${p[1]}</text>`; }).join('');
+// ── Chart primitives (Tufte: labelled gridlines, monthly x-ticks) ────────────────
+const W = 620, H = 230, PADT = 16, PADB = 26;
+const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+// Monthly x-axis ticks (month abbrev; year shown on January). Short ranges (<40
+// days) fall back to ~5 evenly spaced dd/mm labels so it never crowds.
+function xLabels(dates, x, padL) {
+  if (!dates.length) return '';
+  const out = [];
+  if (dates.length < 40) {
+    const n = Math.min(5, dates.length);
+    for (let k = 0; k < n; k++) {
+      const i = Math.round(k * (dates.length - 1) / (n - 1 || 1));
+      const p = dates[i].split('-');
+      out.push(`<text x="${x(i).toFixed(1)}" y="${H - 7}" font-size="10" fill="#999" text-anchor="middle" font-family="'DM Mono',monospace">${p[2]}/${p[1]}</text>`);
+    }
+  } else {
+    let last = '';
+    dates.forEach((d, i) => {
+      const parts = d.split('-');
+      const key = parts[0] + '-' + parts[1];
+      if (key !== last) {
+        last = key;
+        const label = parts[1] === '01' ? `${MON[0]} ${parts[0]}` : MON[Number(parts[1]) - 1];
+        out.push(`<line x1="${x(i).toFixed(1)}" y1="${H - PADB}" x2="${x(i).toFixed(1)}" y2="${H - PADB + 3}" stroke="#ccc" stroke-width="1"/>`);
+        out.push(`<text x="${x(i).toFixed(1)}" y="${H - 7}" font-size="9.5" fill="#999" text-anchor="middle" font-family="'DM Mono',monospace">${label}</text>`);
+      }
+    });
+  }
+  return out.join('');
 }
+
+// Round tick values spanning [min,max].
+function niceTicks(min, max, count) {
+  const span = (max - min) || 1;
+  const raw = span / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw / mag;
+  const step = (norm >= 5 ? 5 : norm >= 2 ? 2 : 1) * mag;
+  const ticks = [];
+  for (let v = Math.ceil(min / step) * step; v <= max + 1e-6; v += step) ticks.push(v);
+  return ticks;
+}
+
 function pathFrom(arr, x, y) {
   let d = '', started = false;
   arr.forEach((v, i) => { if (v == null) { started = false; return; } d += `${started ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)} `; started = true; });
   return d.trim();
 }
 
-// CY vs PY single-axis line chart
-function yoyChart(dates, cy, pyByMD, fmtShort, colorCY) {
-  const padL = 8, padR = 42;
+// CY vs PY single-axis line chart. opts { yMin, yMax, ticks } fixes the band
+// (used for GP% at 25-55, values clamped to the band); otherwise anchored at
+// zero with the top at the data max.
+function yoyChart(dates, cy, pyByMD, fmtShort, colorCY, opts) {
+  opts = opts || {};
+  const padL = 40, padR = 42;
   const n = dates.length;
   const pyA = dates.map(d => { const md = d.slice(5); return pyByMD.has(md) ? pyByMD.get(md) : null; });
   let cyP = cy.slice(), pyP = pyA.slice();
   if (SMOOTH) { cyP = rolling(cyP, 7); pyP = rolling(pyP, 7); }
-  const vals = cyP.concat(pyP).filter(v => v != null).map(Number);
-  const max = Math.max(...vals, 1);
+  const dataMax = Math.max(...cyP.concat(pyP).filter(v => v != null).map(Number), 1);
+  const yMin = opts.yMin != null ? opts.yMin : 0;
+  const yMax = opts.yMax != null ? opts.yMax : dataMax * 1.05;
+  const fixed = opts.yMin != null || opts.yMax != null;
+  if (fixed) {
+    const clamp = v => v == null ? null : Math.max(yMin, Math.min(yMax, v));
+    cyP = cyP.map(clamp); pyP = pyP.map(clamp);
+  }
   const x = i => padL + (n <= 1 ? 0 : (i / (n - 1)) * (W - padL - padR));
-  const y = v => H - PADB - (v / max) * (H - PADT - PADB);
-  const zeroY = (H - PADB).toFixed(1);
+  const y = v => H - PADB - ((v - yMin) / (yMax - yMin)) * (H - PADT - PADB);
+  const ticks = opts.ticks || niceTicks(yMin, yMax, 4);
+  const grid = ticks.map(tv => `<line x1="${padL}" y1="${y(tv).toFixed(1)}" x2="${W - padR}" y2="${y(tv).toFixed(1)}" stroke="#f0f0f0" stroke-width="1"/><text x="${padL - 5}" y="${(y(tv) + 3).toFixed(1)}" font-size="9.5" fill="#bbb" text-anchor="end" font-family="'DM Mono',monospace">${fmtShort(tv)}</text>`).join('');
   const cyYearL = dates.length ? dates[dates.length - 1].slice(0, 4) : '';
   const pyYearL = cyYearL ? String(Number(cyYearL) - 1) : '';
   const lastCyI = cyP.reduce((acc, v, i) => v != null ? i : acc, 0);
   const lastPyI = pyP.reduce((acc, v, i) => v != null ? i : acc, 0);
   return `<svg class="chart-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-    <line x1="${padL}" y1="${zeroY}" x2="${W - padR}" y2="${zeroY}" stroke="#e6e6e6" stroke-width="1"/>
-    <line x1="${padL}" y1="${y(max).toFixed(1)}" x2="${W - padR}" y2="${y(max).toFixed(1)}" stroke="#f0f0f0" stroke-width="1"/>
-    <text x="${padL}" y="${(y(max) - 3).toFixed(1)}" font-size="10" fill="#bbb" font-family="'DM Mono',monospace">${fmtShort(max)}</text>
+    ${grid}
     <path d="${pathFrom(pyP, x, y)}" fill="none" stroke="#b3b3b3" stroke-width="1.4"/>
     <path d="${pathFrom(cyP, x, y)}" fill="none" stroke="${colorCY}" stroke-width="2"/>
     ${cyP[lastCyI] != null ? `<text x="${(x(lastCyI) + 4).toFixed(1)}" y="${(y(cyP[lastCyI]) + 3).toFixed(1)}" font-size="10" fill="${colorCY}" font-weight="700" font-family="'Barlow Condensed',sans-serif">${cyYearL}</text>` : ''}
     ${pyP[lastPyI] != null ? `<text x="${(x(lastPyI) + 4).toFixed(1)}" y="${(y(pyP[lastPyI]) + 3).toFixed(1)}" font-size="10" fill="#9a9a9a" font-weight="700" font-family="'Barlow Condensed',sans-serif">${pyYearL}</text>` : ''}
-    ${xLabels(dates, x)}
+    ${xLabels(dates, x, padL)}
   </svg>`;
 }
 
-// Value vs Units dual axis (sales £ left, units right)
+// Value vs Units dual axis: sales £ on the left (with gridlines), units on the right.
 function dualChart(dates, sales, units) {
-  const padL = 8, padR = 8;
+  const padL = 40, padR = 42;
   const n = dates.length;
   let s = sales.slice(), u = units.slice();
   if (SMOOTH) { s = rolling(s, 7); u = rolling(u, 7); }
-  const maxS = Math.max(...s.filter(v => v != null), 1);
-  const maxU = Math.max(...u.filter(v => v != null), 1);
+  const maxS = Math.max(...s.filter(v => v != null), 1) * 1.05;
+  const maxU = Math.max(...u.filter(v => v != null), 1) * 1.05;
   const x = i => padL + (n <= 1 ? 0 : (i / (n - 1)) * (W - padL - padR));
   const yS = v => H - PADB - (v / maxS) * (H - PADT - PADB);
   const yU = v => H - PADB - (v / maxU) * (H - PADT - PADB);
-  const zeroY = (H - PADB).toFixed(1);
+  const grid = niceTicks(0, maxS, 4).map(tv => `<line x1="${padL}" y1="${yS(tv).toFixed(1)}" x2="${W - padR}" y2="${yS(tv).toFixed(1)}" stroke="#f0f0f0" stroke-width="1"/><text x="${padL - 5}" y="${(yS(tv) + 3).toFixed(1)}" font-size="9.5" fill="#9ACD00" text-anchor="end" font-family="'DM Mono',monospace">${shortGBP(tv).replace('£','')}</text>`).join('');
+  const uLabels = niceTicks(0, maxU, 4).map(tv => `<text x="${W - padR + 4}" y="${(yU(tv) + 3).toFixed(1)}" font-size="9.5" fill="#3a3a3a" font-family="'DM Mono',monospace">${shortNum(tv)}</text>`).join('');
   return `<svg class="chart-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-    <line x1="${padL}" y1="${zeroY}" x2="${W - padR}" y2="${zeroY}" stroke="#e6e6e6" stroke-width="1"/>
-    <text x="${padL}" y="12" font-size="10" fill="#9ACD00" font-family="'DM Mono',monospace">£ ${shortGBP(maxS).replace('£','')}</text>
-    <text x="${W - padR}" y="12" font-size="10" fill="#3a3a3a" text-anchor="end" font-family="'DM Mono',monospace">${shortNum(maxU)} u</text>
+    ${grid}${uLabels}
+    <text x="${padL - 5}" y="11" font-size="9" fill="#9ACD00" text-anchor="end" font-family="'DM Mono',monospace">£</text>
+    <text x="${W - padR + 4}" y="11" font-size="9" fill="#3a3a3a" font-family="'DM Mono',monospace">u</text>
     <path d="${pathFrom(u, x, yU)}" fill="none" stroke="#3a3a3a" stroke-width="1.6"/>
     <path d="${pathFrom(s, x, yS)}" fill="none" stroke="#9ACD00" stroke-width="2"/>
-    ${xLabels(dates, x)}
+    ${xLabels(dates, x, padL)}
   </svg>`;
 }
 
@@ -139,7 +186,7 @@ async function loadCharts() {
         yoyChart(dates, col('gp'), byMD(pyRows, 'gp'), shortGBP, '#9ACD00'), legendYoY(cyYear, pyYear)),
       card('GP %',
         `<span class="cy">${t.gp_pct == null ? '—' : t.gp_pct.toFixed(1) + '%'}</span> &nbsp; <span style="color:#999">PY ${pt.gp_pct == null ? '—' : pt.gp_pct.toFixed(1) + '%'}</span>`,
-        yoyChart(dates, col('gp_pct'), byMD(pyRows, 'gp_pct'), v => v.toFixed(0) + '%', '#9ACD00'), legendYoY(cyYear, pyYear))
+        yoyChart(dates, col('gp_pct'), byMD(pyRows, 'gp_pct'), v => v.toFixed(0) + '%', '#9ACD00', { yMin: 25, yMax: 55, ticks: [25, 35, 45, 55] }), legendYoY(cyYear, pyYear))
     ];
     $('content').innerHTML = `<div class="chart-grid">${panels.join('')}</div>`;
   } catch (e) {
