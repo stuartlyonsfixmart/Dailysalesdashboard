@@ -87,17 +87,44 @@ function workingDaysCard(wd, note) {
     </div>
   </div>`;
 }
+// Each card carries its headline for the period plus the per-working-day rate
+// underneath, so the average is context on the number rather than a separate tile.
 function renderSparks(rows, totals, wd) {
   const d = rows.filter(r => Number(r.orders) > 1);
+  const pd = totals.per_day || {};
+  const lpo = totals.lines_per_order == null ? '—' : totals.lines_per_order;
   const cards = [
-    { t: 'Sales', v: shortGBP(totals.sales), s: d.map(r => Number(r.sales) || 0) },
-    { t: 'Gross Profit', v: shortGBP(totals.gp) + ' <small>' + fmtPct(totals.gp_pct) + '</small>', s: d.map(r => Number(r.gp) || 0) },
-    { t: 'Units', v: shortNum(totals.units), s: d.map(r => Number(r.units) || 0) },
-    { t: 'Weight', v: shortNum(totals.weight_kg) + ' <small>kg</small>', s: d.map(r => Number(r.weight_kg) || 0) }
+    { t: 'Sales', v: shortGBP(totals.sales),
+      sub: shortGBP(pd.sales) + ' / day', s: d.map(r => Number(r.sales) || 0) },
+    { t: 'Gross Profit', v: shortGBP(totals.gp) + ' <small>' + fmtPct(totals.gp_pct) + '</small>',
+      sub: shortGBP(pd.gp) + ' / day', s: d.map(r => Number(r.gp) || 0) },
+    { t: 'Orders', v: fmtInt(totals.orders),
+      sub: fmtInt(pd.orders) + ' / day · ' + fmtGBP(totals.aov) + ' avg order', s: d.map(r => Number(r.orders) || 0) },
+    { t: 'Order Lines', v: shortNum(totals.order_lines),
+      sub: shortNum(pd.order_lines) + ' / day · ' + lpo + ' per order', s: d.map(r => Number(r.order_lines) || 0) },
+    { t: 'Units', v: shortNum(totals.units),
+      sub: shortNum(pd.units) + ' / day', s: d.map(r => Number(r.units) || 0) },
+    { t: 'Weight', v: shortNum(totals.weight_kg) + ' <small>kg</small>',
+      sub: shortNum(pd.weight_kg) + ' kg / day', s: d.map(r => Number(r.weight_kg) || 0) }
   ];
   $('sparks').innerHTML = workingDaysCard(wd, 'excl. E&W bank hols') + cards.map(c => `
     <div class="spark-card"><div class="spark-title">${c.t}</div>
-      <div class="spark-val">${c.v}</div>${sparkline(c.s)}</div>`).join('');
+      <div class="spark-val">${c.v}</div>
+      <div class="spark-sub">${c.sub}</div>${sparkline(c.s)}</div>`).join('');
+  renderExcluded(totals);
+}
+
+// The internal-account exclusion is shown rather than applied silently, so if it
+// ever removes something unexpected somebody notices the same day.
+function renderExcluded(totals) {
+  const el = $('excluded-note');
+  if (!el) return;
+  const v = Number(totals.excluded_sales) || 0;
+  if (!v) { el.innerHTML = ''; el.style.display = 'none'; return; }
+  el.innerHTML = 'Excludes <strong>' + fmtGBP(v) + '</strong> on internal Fixmart accounts '
+    + '(Ltd, Engineering, Subcontract, GmbH). These carry no sales rep and sit outside '
+    + 'the OrderWise sales report by design.';
+  el.style.display = 'block';
 }
 
 function renderWarnings(zeroDays) {
@@ -117,6 +144,7 @@ const fmtDate = s => { const p = s.split('-'); return `${p[2]}/${p[1]}/${p[0]}`;
 
 function renderTable(rows, totals, zeroDays) {
   const zero = new Set(zeroDays || []);
+  const pd = totals.per_day || {};
   if (!rows.length) { $('content').innerHTML = '<div class="err">No orders in this range.</div>'; return; }
   const body = rows.map(r => {
     const dow = new Date(r.order_date + 'T00:00:00').getDay();
@@ -141,7 +169,12 @@ function renderTable(rows, totals, zeroDays) {
       <td class="right">${fmtInt(totals.orders)}</td><td class="right">${fmtInt(totals.order_lines)}</td>
       <td class="right">${fmtInt(totals.units)}</td><td class="right">${fmtInt(totals.weight_kg)}</td>
       <td class="right lime">${fmtGBP(totals.sales)}</td><td class="right lime">${fmtGBP(totals.gp)}</td>
-      <td class="right lime">${fmtPct(totals.gp_pct)}</td></tr></tfoot></table></div>`;
+      <td class="right lime">${fmtPct(totals.gp_pct)}</td></tr>
+    <tr class="avg-row"><td>Average per working day <span class="wd-count">${fmtInt(totals.working_days_in_range)} days</span></td>
+      <td class="right">${fmtInt(pd.orders)}</td><td class="right">${fmtInt(pd.order_lines)}</td>
+      <td class="right">${fmtInt(pd.units)}</td><td class="right">${fmtInt(pd.weight_kg)}</td>
+      <td class="right">${fmtGBP(pd.sales)}</td><td class="right">${fmtGBP(pd.gp)}</td>
+      <td class="right">${fmtPct(totals.gp_pct)}</td></tr></tfoot></table></div>`;
 }
 
 async function load() {
