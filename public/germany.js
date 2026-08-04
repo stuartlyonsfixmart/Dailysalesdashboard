@@ -22,39 +22,26 @@ function shortNum(n) {
 }
 
 // ── State / nav ────────────────────────────────────────────────────────────────
-function persist() {
-  FilterState.set({ from: $('date-from').value, to: $('date-to').value });
-  syncNav();
-}
 function syncNav() {
-  const c = $('nav-charts'); if (c) c.href = FilterState.href('/charts.html');
   const t = $('nav-table'); if (t) t.href = FilterState.href('/index.html');
   const g = $('nav-germany'); if (g) g.href = FilterState.href('/germany.html');
   const b = $('nav-combined'); if (b) b.href = FilterState.href('/combined.html');
 }
-function clearPresets() { document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active')); }
-
-function setMTD() {
-  clearPresets(); $('preset-mtd').classList.add('active');
-  const m = FilterState.mtd();
-  $('date-from').value = m.from; $('date-to').value = m.to;
-  persist(); load();
+// One control: the month. A past month runs 1st to last day; the current month
+// runs 1st to today.
+function rangeForMonth(v) {
+  const [y, m] = v.split('-').map(Number);
+  const lastDom = new Date(y, m, 0).getDate();
+  const last = `${v}-${String(lastDom).padStart(2, '0')}`;
+  const todayStr = iso(new Date());
+  return { from: `${v}-01`, to: last > todayStr ? todayStr : last };
 }
-function setYTD() {
-  clearPresets(); $('preset-ytd').classList.add('active');
-  const now = new Date();
-  $('date-from').value = iso(new Date(now.getFullYear(), 0, 1)); $('date-to').value = iso(now);
-  persist(); load();
+function onMonthChange() {
+  const v = $('month-select').value;
+  if (!v) return;
+  FilterState.set(rangeForMonth(v));
+  syncNav(); load();
 }
-function setPreset(weeks) {
-  clearPresets();
-  document.querySelectorAll('.toggle-btn').forEach(b => { if (b.textContent.trim() === weeks + 'w') b.classList.add('active'); });
-  const now = new Date();
-  const start = new Date(now); start.setDate(now.getDate() - weeks * 7);
-  $('date-from').value = iso(start); $('date-to').value = iso(now);
-  persist(); load();
-}
-function onDateChange() { clearPresets(); persist(); load(); }
 
 // ── Sparklines (Tufte small multiple) ──────────────────────────────────────────
 function sparkline(values) {
@@ -131,7 +118,8 @@ function renderTable(rows, totals) {
 }
 
 async function load() {
-  const from = $('date-from').value, to = $('date-to').value;
+  const s = FilterState.get();
+  const from = s.from, to = s.to;
   if (!from || !to) return;
   $('content').innerHTML = '<div class="loading"><div class="spinner"></div> Loading from BigQuery…</div>';
   $('table-count').textContent = 'Loading…';
@@ -158,12 +146,12 @@ async function loadFreshness() {
   } catch (e) { $('freshness').textContent = ''; }
 }
 
-// init: hydrate from URL (defaults to MTD), then load
+// init: hydrate from URL (defaults to the current month), then load
 (async function init() {
   const s = FilterState.get();
-  $('date-from').value = s.from; $('date-to').value = s.to;
-  clearPresets();
-  if (FilterState.isMTD()) $('preset-mtd').classList.add('active');
+  const ms = $('month-select');
+  ms.max = iso(new Date()).slice(0, 7); // no future months
+  ms.value = s.from.slice(0, 7);
   syncNav();
   loadFreshness();
   load();

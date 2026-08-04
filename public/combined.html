@@ -35,9 +35,6 @@
   .filter-select option { background: #333; }
   .filter-group { display: flex; align-items: center; gap: 7px; }
   .filter-div { width: 1px; height: 20px; background: rgba(255,255,255,0.1); }
-  .toggle { display: flex; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; overflow: hidden; }
-  .toggle-btn { padding: 4px 12px; font-size: 12px; font-weight: 700; font-family: 'Barlow Condensed', sans-serif; letter-spacing: 0.05em; cursor: pointer; color: rgba(255,255,255,0.45); background: transparent; border: none; }
-  .toggle-btn.active { background: var(--lime); color: var(--black); }
 
   /* SMALL MULTIPLES */
   .sparks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; max-width: 900px; }
@@ -110,7 +107,6 @@
 
 <div class="nav">
   <a href="/index.html" class="nav-link" id="nav-table">UK · Daily Table</a>
-  <a href="/charts.html" class="nav-link" id="nav-charts">UK · Charts</a>
   <a href="/germany.html" class="nav-link" id="nav-germany">Germany (GmbH)</a>
   <a href="/combined.html" class="nav-link active" id="nav-combined">Combined (UK + GmbH)</a>
 </div>
@@ -119,29 +115,8 @@
 
   <div class="filters-bar">
     <div class="filter-group">
-      <span class="filter-label">Period</span>
-      <div class="toggle" style="margin-right:4px">
-        <button class="toggle-btn active" id="preset-mtd" onclick="setMTD()">MTD</button>
-        <button class="toggle-btn" onclick="setPreset(4)">4w</button>
-        <button class="toggle-btn" onclick="setPreset(13)">13w</button>
-        <button class="toggle-btn" onclick="setPreset(26)">26w</button>
-        <button class="toggle-btn" onclick="setPreset(52)">52w</button>
-        <button class="toggle-btn" id="preset-ytd" onclick="setYTD()">YTD</button>
-      </div>
-    </div>
-    <div class="filter-div"></div>
-    <div class="filter-group">
       <span class="filter-label">Month</span>
       <input type="month" class="filter-select" id="month-select" onchange="onMonthChange()" style="cursor:pointer">
-    </div>
-    <div class="filter-div"></div>
-    <div class="filter-group">
-      <span class="filter-label">From</span>
-      <input type="date" class="filter-select" id="date-from" onchange="onDateChange()" style="cursor:pointer">
-    </div>
-    <div class="filter-group">
-      <span class="filter-label">To</span>
-      <input type="date" class="filter-select" id="date-to" onchange="onDateChange()" style="cursor:pointer">
     </div>
   </div>
 
