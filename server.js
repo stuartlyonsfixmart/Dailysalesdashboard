@@ -5,6 +5,7 @@
 const express = require('express');
 const session = require('express-session');
 const { BigQuery } = require('@google-cloud/bigquery');
+const { google } = require('googleapis');
 const NodeCache = require('node-cache');
 const path = require('path');
 
@@ -57,6 +58,11 @@ const PROJECT_ID = process.env.BQ_PROJECT_ID || 'project-aa7ee149-5e29-4eb4-8bc'
 const P = PROJECT_ID;
 const bigquery = new BigQuery({ projectId: PROJECT_ID });
 const cache = new NodeCache({ stdTTL: 900 }); // 15 min; OrderWise loads nightly anyway
+
+// Manually-recorded KPIs (MSIs, visits, ...) live in a Google Sheet owned by the
+// team, read via the Cloud Run service account. The sheet must be shared with
+// that account as Viewer. Read-only by construction: this app never writes to it.
+const KPI_SHEET_ID = process.env.KPI_SHEET_ID || '1PqCNvSr8SE_pHTessBveOaVhz2XTI3wVbAjsMprJUvQ';
 
 // Valid sales order types — matches the OrderWise "Top N Customers by Sales Net"
 // report (10-0028-001). Type 11 is deliberately excluded, as per the report.
@@ -165,9 +171,11 @@ function addRunningTotals(rows, country) {
     cumSales += Number(r.sales) || 0;
     cumGp += Number(r.gp) || 0;
     const dow = new Date(r.order_date + 'T00:00:00').getDay();
-    if (dow !== 0 && dow !== 6 && !hol.has(r.order_date)) wd++;
+    const isWd = dow !== 0 && dow !== 6 && !hol.has(r.order_date);
+    if (isWd) wd++;
     const orders = Number(r.orders) || 0;
     return Object.assign({}, r, {
+      day_no: isWd ? wd : null, // working-day number within the range; blank on weekends/hols
       sales_rtotal: Math.round(cumSales),
       gp_rtotal: Math.round(cumGp),
       sales_avg_day: wd ? Math.round(cumSales / wd) : null,
@@ -458,6 +466,172 @@ app.get('/api/combined', async (req, res) => {
     cache.set(cacheKey, payload);
     res.json({ success: true, ...payload, cached: false });
   } catch (err) { console.error('Combined error:', err); res.status(500).json({ success: false, error: err.message }); }
+});
+
+// ── KPI tracker (manual entry, Google Sheet) ────────────────────────────────
+// Two tabs. "KPIs" defines what exists: Name | Unit | Monthly Target |
+// Active From | Active To (blank = still active). "Daily" holds the numbers:
+// Date in column A, one column per KPI, headers matching the Name column.
+// Values are read UNFORMATTED with dates as serial numbers, so on-screen
+// formatting in the sheet cannot mislead the parsing. KPI names are matched
+// ignoring case, spaces and punctuation, so "MSI's" and "MSIs" line up.
+
+// Google Sheets serial day 0 is 30 Dec 1899.
+const SHEET_EPOCH = Date.UTC(1899, 11, 30);
+function serialToISO(n) {
+  return new Date(SHEET_EPOCH + Math.floor(n + 1e-7) * 86400000).toISOString().slice(0, 10);
+}
+// Accepts a serial number, a dd/mm/yyyy string (UK locale) or yyyy-mm-dd.
+function parseSheetDate(v) {
+  if (v == null || v === '') return null;
+  if (typeof v === 'number' && isFinite(v)) return serialToISO(v);
+  const s = String(v).trim();
+  let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return m[0];
+  return null;
+}
+const normKey = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+function parseUnit(u) {
+  const s = String(u || '').toLowerCase();
+  if (s.startsWith('c') || s.includes('£') || s.includes('gbp')) return 'currency';
+  if (s.startsWith('p') || s.includes('%')) return 'percent';
+  return 'number';
+}
+// Total working days (Mon-Fri less E&W hols) in the month containing dateStr.
+const wdMonthCache = new Map();
+function workingDaysInMonthOf(dateStr) {
+  const key = dateStr.slice(0, 7);
+  if (wdMonthCache.has(key)) return wdMonthCache.get(key);
+  const y = Number(key.slice(0, 4)), m = Number(key.slice(5, 7)) - 1;
+  const last = new Date(y, m + 1, 0).getDate();
+  let n = 0;
+  for (let d = 1; d <= last; d++) {
+    const dt = new Date(y, m, d), ds = isoLocal(dt), dow = dt.getDay();
+    if (dow !== 0 && dow !== 6 && !HOLIDAYS.uk.has(ds)) n++;
+  }
+  wdMonthCache.set(key, n);
+  return n;
+}
+
+app.get('/api/kpis', async (req, res) => {
+  const today = new Date().toISOString().slice(0, 10);
+  const firstOfMonth = today.slice(0, 8) + '01';
+  const startDate = req.query.startDate || firstOfMonth;
+  const endDate = req.query.endDate || today;
+
+  const cacheKey = `kpis_${startDate}_${endDate}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return res.json({ success: true, ...cached, cached: true });
+
+  const auth = new google.auth.GoogleAuth({ scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'] });
+  let saEmail = '';
+  try { const c = await auth.getCredentials(); saEmail = c && c.client_email ? c.client_email : ''; } catch (e) { /* metadata only */ }
+
+  try {
+    const client = await auth.getClient();
+    const sheets = google.sheets({ version: 'v4', auth: client });
+    const resp = await sheets.spreadsheets.values.batchGet({
+      spreadsheetId: KPI_SHEET_ID,
+      ranges: ['KPIs!A1:E200', 'Daily!A1:AZ2000'],
+      valueRenderOption: 'UNFORMATTED_VALUE',
+      dateTimeRenderOption: 'SERIAL_NUMBER'
+    });
+    const [defTab, dailyTab] = resp.data.valueRanges.map(v => v.values || []);
+
+    // Definitions: skip header, keep rows with a name. Active window filtering:
+    // a KPI appears if its active window overlaps the requested range at all.
+    const kpis = defTab.slice(1)
+      .filter(r => r && r[0])
+      .map(r => ({
+        key: normKey(r[0]),
+        name: String(r[0]).trim(),
+        unit: parseUnit(r[1]),
+        target: (r[2] == null || r[2] === '') ? null : Number(r[2]),
+        activeFrom: parseSheetDate(r[3]),
+        activeTo: parseSheetDate(r[4])
+      }))
+      .filter(k => (!k.activeFrom || k.activeFrom <= endDate) && (!k.activeTo || k.activeTo >= startDate));
+
+    // Daily tab: header row maps columns to KPI keys; body maps date -> values.
+    const header = (dailyTab[0] || []).map(normKey);
+    const colFor = {};
+    kpis.forEach(k => { const i = header.indexOf(k.key); if (i > 0) colFor[k.key] = i; });
+    const byDate = new Map();
+    dailyTab.slice(1).forEach(r => {
+      const d = parseSheetDate(r && r[0]);
+      if (d) byDate.set(d, r);
+    });
+
+    // Walk the range like the sales table does: every weekday is a row, weekend
+    // rows only when they carry data. Accrual (running totals, pro-rata target,
+    // working-day count) stops at today, so pre-filled future rows are inert.
+    const rows = [];
+    const cum = {}, tgt = {};
+    kpis.forEach(k => { cum[k.key] = 0; tgt[k.key] = 0; });
+    let wd = 0;
+    const cur = new Date(startDate + 'T00:00:00');
+    const end = new Date(endDate + 'T00:00:00');
+    while (cur <= end) {
+      const ds = isoLocal(cur);
+      const dow = cur.getDay();
+      const sheetRow = byDate.get(ds);
+      const isWeekday = dow !== 0 && dow !== 6;
+      const isWd = isWeekday && !HOLIDAYS.uk.has(ds) && ds <= today;
+      const hasData = sheetRow && kpis.some(k => {
+        const v = colFor[k.key] != null ? sheetRow[colFor[k.key]] : null;
+        return v !== '' && v != null;
+      });
+      if (isWeekday || hasData) {
+        if (isWd) wd++;
+        const cells = {};
+        kpis.forEach(k => {
+          const raw = sheetRow && colFor[k.key] != null ? sheetRow[colFor[k.key]] : null;
+          const v = (raw === '' || raw == null || isNaN(Number(raw))) ? null : Number(raw);
+          if (v != null && ds <= today) cum[k.key] += v;
+          if (isWd && k.target != null) tgt[k.key] += k.target / workingDaysInMonthOf(ds);
+          cells[k.key] = {
+            v,
+            rtotal: ds <= today ? Math.round(cum[k.key] * 100) / 100 : null,
+            rtarget: (isWd || ds <= today) && k.target != null ? Math.round(tgt[k.key] * 10) / 10 : null,
+            aveday: wd && ds <= today ? Math.round((cum[k.key] / wd) * 10) / 10 : null
+          };
+        });
+        rows.push({ order_date: ds, day_no: isWd ? wd : null, cells });
+      }
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    const totals = {};
+    kpis.forEach(k => {
+      totals[k.key] = {
+        total: Math.round(cum[k.key] * 100) / 100,
+        rtarget: k.target != null ? Math.round(tgt[k.key]) : null,
+        aveday: wd ? Math.round((cum[k.key] / wd) * 10) / 10 : null
+      };
+    });
+
+    const payload = { available: true, kpis: kpis.map(k => ({ key: k.key, name: k.name, unit: k.unit, target: k.target })), rows, totals, workingDays: wd, startDate, endDate };
+    cache.set(cacheKey, payload, 60); // sheet edits show within a minute
+    res.json({ success: true, ...payload, cached: false });
+  } catch (err) {
+    console.error('KPI sheet error:', err.message);
+    const msg = String(err.message || err);
+    let reason;
+    if (/permission|403|insufficient/i.test(msg)) {
+      reason = 'The KPI sheet is not accessible. Share it as Viewer with ' + (saEmail || 'the Cloud Run service account') + ' and check the Google Sheets API is enabled.';
+    } else if (/404|not found|requested entity/i.test(msg)) {
+      reason = 'KPI sheet not found. Check KPI_SHEET_ID.';
+    } else if (/default credentials/i.test(msg)) {
+      reason = 'No Google credentials in this environment (expected when running outside Cloud Run).';
+    } else {
+      reason = msg.slice(0, 140);
+    }
+    // Available:false is a soft state, not an error: the board hides the section
+    // and shows the reason quietly so misconfiguration is visible, not silent.
+    res.json({ success: true, available: false, reason });
+  }
 });
 
 // Freshness — last order_header load, so the header can show "data as of".
