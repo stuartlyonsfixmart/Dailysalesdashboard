@@ -63,7 +63,8 @@ const cache = new NodeCache({ stdTTL: 900 }); // 15 min; OrderWise loads nightly
 const SOT = '1,4,8,9';
 
 // Sign flip for credits — the report negates both sot 4 and sot 9.
-const SIGN = 'CASE WHEN oh.oh_sot_id IN (4, 9) THEN -1 ELSE 1 END';
+// Parenthesised because it is now nested inside other CASE expressions.
+const SIGN = '(CASE WHEN oh.oh_sot_id IN (4, 9) THEN -1 ELSE 1 END)';
 
 // Public holidays (date-only). uk = England & Wales; de = Hesse (Frankfurt/GmbH).
 // Germany has no substitute-day rule, so weekend holidays are simply listed as-is.
@@ -79,6 +80,39 @@ const HOLIDAYS = {
 };
 
 const isoLocal = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+// Account-manager lookup, guaranteed one row per customer.
+// OrderWise report 10-0028-001 (the daily sales report Cariss circulates) inner
+// joins customer_detail -> customer_profile -> user_detail, so any customer with
+// no sales rep assigned is excluded from its figures. In practice that is exactly
+// the internal Fixmart accounts (Ltd, Engineering, Subcontract, GmbH), which carry
+// cost transfers at nil or negative margin. Reproducing the join rather than
+// hardcoding an account list means a new internal account is excluded on day one.
+// Validated Aug 2026: July agreed with the report to £1,178 on £2.0m (0.06%).
+const REP_LOOKUP = [
+  '  SELECT cd.cd_id AS cd_id, ANY_VALUE(ud.ud_username) AS sales_rep',
+  '  FROM `' + PROJECT_ID + '.fixmart_bi.customer_detail` cd',
+  '  JOIN `' + PROJECT_ID + '.fixmart_bi.customer_profile` cp ON cp.cp_customer_id = cd.cd_id',
+  '  JOIN `' + PROJECT_ID + '.fixmart_bi.user_detail` ud ON ud.ud_id = cp.cp_sales_rep',
+  '  GROUP BY 1'
+].join('\n');
+
+// Working days (Mon-Fri minus public holidays) inside the selected range, never
+// counting past today. Used as the denominator for the per-day averages, so a
+// 13-week view divides by its own working days rather than the month's.
+function workingDaysInRange(startDate, endDate, country) {
+  const hol = HOLIDAYS[country] || HOLIDAYS.uk;
+  const todayStr = isoLocal(new Date());
+  const cur = new Date(startDate + 'T00:00:00');
+  const end = new Date(endDate + 'T00:00:00');
+  let n = 0;
+  while (cur <= end) {
+    const ds = isoLocal(cur), dow = cur.getDay();
+    if (dow !== 0 && dow !== 6 && !hol.has(ds) && ds <= todayStr) n++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return n;
+}
 
 // Working days in the month of endDate: elapsed (to endDate, capped at today) and total.
 // Working day = Mon-Fri minus the relevant country's public holidays.
@@ -112,10 +146,35 @@ function scaffoldDays(rows, startDate, endDate) {
     const ds = isoLocal(cur);
     const dow = cur.getDay();
     if (byDate.has(ds)) out.push(byDate.get(ds));
-    else if (dow !== 0 && dow !== 6) out.push({ order_date: ds, orders: 0, order_lines: 0, units: 0, weight_kg: 0, sales: 0, gp: 0, gp_pct: null });
+    else if (dow !== 0 && dow !== 6) out.push({ order_date: ds, orders: 0, order_lines: 0, units: 0, weight_kg: 0, sales: 0, gp: 0, gp_pct: null, excluded_sales: 0 });
     cur.setDate(cur.getDate() + 1);
   }
   return out;
+}
+
+// Running totals and cumulative averages, matching the finance sheet's layout.
+// Ave/Day is the running total divided by working days elapsed so far, not a
+// rolling window: on day one it equals that day, by month end it equals the
+// period average. Weekend rows carry the running total forward without
+// incrementing the day count, so a Saturday order cannot dilute the average.
+// Av Ord Val is that day's own sales over that day's own orders.
+function addRunningTotals(rows, country) {
+  const hol = HOLIDAYS[country] || HOLIDAYS.uk;
+  let cumSales = 0, cumGp = 0, wd = 0;
+  return rows.map(r => {
+    cumSales += Number(r.sales) || 0;
+    cumGp += Number(r.gp) || 0;
+    const dow = new Date(r.order_date + 'T00:00:00').getDay();
+    if (dow !== 0 && dow !== 6 && !hol.has(r.order_date)) wd++;
+    const orders = Number(r.orders) || 0;
+    return Object.assign({}, r, {
+      sales_rtotal: Math.round(cumSales),
+      gp_rtotal: Math.round(cumGp),
+      sales_avg_day: wd ? Math.round(cumSales / wd) : null,
+      gp_avg_day: wd ? Math.round(cumGp / wd) : null,
+      aov: orders ? Math.round((Number(r.sales) || 0) / orders) : null
+    });
+  });
 }
 
 // Zero-fill weekdays for the combined board (UK/DE/combined split shape).
@@ -158,12 +217,15 @@ app.get('/api/reps', async (req, res) => {
   const cacheKey = 'reps';
   const cached = cache.get(cacheKey);
   if (cached) return res.json({ success: true, reps: cached, cached: true });
+  // Only reps that actually hold trading customers. No 'Unknown' bucket: customers
+  // with no rep are internal accounts and are out of scope for the sales figures.
   const query = [
-    'SELECT DISTINCT COALESCE(ud.ud_username, \'Unknown\') AS sales_rep',
+    'WITH reps AS (',
+    REP_LOOKUP,
+    ')',
+    'SELECT DISTINCT r.sales_rep',
     'FROM `' + P + '.fixmart_bi.order_header` oh',
-    'LEFT JOIN `' + P + '.fixmart_bi.customer_detail` cd ON cd.cd_id = oh.oh_cd_id',
-    'LEFT JOIN `' + P + '.fixmart_bi.customer_profile` cp ON cp.cp_customer_id = cd.cd_id',
-    'LEFT JOIN `' + P + '.fixmart_bi.user_detail` ud ON ud.ud_id = cp.cp_sales_rep',
+    'JOIN reps r ON r.cd_id = oh.oh_cd_id',
     'WHERE oh.oh_datetime >= DATE_SUB(CURRENT_DATE(), INTERVAL 365 DAY)',
     '  AND oh.oh_sot_id IN (' + SOT + ')',
     'ORDER BY 1'
@@ -191,16 +253,17 @@ app.get('/api/daily', async (req, res) => {
   const cached = cache.get(cacheKey);
   if (cached) return res.json({ success: true, ...cached, cached: true });
 
-  // Rep filter joins the customer -> profile -> user chain and filters on username.
-  const repJoin = rep ? [
-    'LEFT JOIN `' + P + '.fixmart_bi.customer_detail` cd ON cd.cd_id = oh.oh_cd_id',
-    'LEFT JOIN `' + P + '.fixmart_bi.customer_profile` cp ON cp.cp_customer_id = cd.cd_id',
-    'LEFT JOIN `' + P + '.fixmart_bi.user_detail` ud ON ud.ud_id = cp.cp_sales_rep'
-  ].join('\n') : '';
-  const repWhere = rep ? "AND COALESCE(ud.ud_username, 'Unknown') = @rep" : '';
+  // Internal accounts (no sales rep) are excluded from every figure, matching the
+  // OrderWise report. Their value is still returned as excluded_sales so the
+  // exclusion is visible on screen rather than silent.
+  const repWhere = rep ? 'AND r.sales_rep = @rep' : '';
+  const IN_SCOPE = 'r.cd_id IS NOT NULL';
 
   const query = [
-    'WITH oh AS (',
+    'WITH reps AS (',
+    REP_LOOKUP,
+    '),',
+    'oh AS (',
     '  SELECT oh_id, oh_datetime, oh_sot_id, oh_cd_id',
     '  FROM `' + P + '.fixmart_bi.order_header` oh',
     '  WHERE oh_datetime BETWEEN @startDate AND @endDate',
@@ -214,17 +277,21 @@ app.get('/api/daily', async (req, res) => {
     ')',
     'SELECT',
     '  FORMAT_DATE(\'%Y-%m-%d\', oh.oh_datetime) AS order_date',
-    ', COUNT(DISTINCT oh.oh_id) AS orders',
-    ', SUM(l.order_lines) AS order_lines',
-    ', CAST(ROUND(SUM(l.units),0) AS INT64) AS units',
-    ', CAST(ROUND(SUM(' + SIGN + ' * oht.oht_weight),0) AS INT64) AS weight_kg',
-    ', ROUND(SUM(' + SIGN + ' * oht.oht_net),0) AS sales',
-    ', ROUND(SUM(' + SIGN + ' * oht.oht_total_margin),0) AS gp',
-    ', ROUND(SAFE_DIVIDE(SUM(' + SIGN + ' * oht.oht_total_margin), SUM(' + SIGN + ' * oht.oht_net)) * 100, 2) AS gp_pct',
+    ', COUNT(DISTINCT CASE WHEN ' + IN_SCOPE + ' THEN oh.oh_id END) AS orders',
+    ', IFNULL(SUM(CASE WHEN ' + IN_SCOPE + ' THEN l.order_lines END),0) AS order_lines',
+    ', CAST(ROUND(IFNULL(SUM(CASE WHEN ' + IN_SCOPE + ' THEN l.units END),0),0) AS INT64) AS units',
+    ', CAST(ROUND(SUM(CASE WHEN ' + IN_SCOPE + ' THEN ' + SIGN + ' * oht.oht_weight ELSE 0 END),0) AS INT64) AS weight_kg',
+    ', ROUND(SUM(CASE WHEN ' + IN_SCOPE + ' THEN ' + SIGN + ' * oht.oht_net ELSE 0 END),0) AS sales',
+    ', ROUND(SUM(CASE WHEN ' + IN_SCOPE + ' THEN ' + SIGN + ' * oht.oht_total_margin ELSE 0 END),0) AS gp',
+    ', ROUND(SAFE_DIVIDE(',
+    '    SUM(CASE WHEN ' + IN_SCOPE + ' THEN ' + SIGN + ' * oht.oht_total_margin ELSE 0 END),',
+    '    SUM(CASE WHEN ' + IN_SCOPE + ' THEN ' + SIGN + ' * oht.oht_net ELSE 0 END)) * 100, 2) AS gp_pct',
+    ', ROUND(SUM(CASE WHEN r.cd_id IS NULL THEN ' + SIGN + ' * oht.oht_net ELSE 0 END),0) AS excluded_sales',
     'FROM oh',
     'JOIN `' + P + '.fixmart_bi.Order_Header_Total` oht ON oht.oht_oh_id = oh.oh_id',
-    'JOIN lines l ON l.oli_oh_id = oh.oh_id',
-    repJoin,
+    // LEFT, not INNER: an order with no line items still counts as a sale.
+    'LEFT JOIN lines l ON l.oli_oh_id = oh.oh_id',
+    'LEFT JOIN reps r ON r.cd_id = oh.oh_cd_id',
     'WHERE 1 = 1 ' + repWhere,
     'GROUP BY 1',
     'ORDER BY 1'
@@ -241,9 +308,21 @@ app.get('/api/daily', async (req, res) => {
       t.weight_kg += Number(r.weight_kg) || 0;
       t.sales += Number(r.sales) || 0;
       t.gp += Number(r.gp) || 0;
+      t.excluded_sales += Number(r.excluded_sales) || 0;
       return t;
-    }, { orders: 0, order_lines: 0, units: 0, weight_kg: 0, sales: 0, gp: 0 });
+    }, { orders: 0, order_lines: 0, units: 0, weight_kg: 0, sales: 0, gp: 0, excluded_sales: 0 });
     totals.gp_pct = totals.sales ? Math.round((totals.gp / totals.sales) * 10000) / 100 : null;
+    // Average order value, and lines per order, on the same order-book basis.
+    totals.aov = totals.orders ? Math.round(totals.sales / totals.orders) : null;
+    totals.lines_per_order = totals.orders ? Math.round((totals.order_lines / totals.orders) * 10) / 10 : null;
+    // Per working day across the requested range (not the calendar month).
+    const wdRange = workingDaysInRange(qStart, qEnd, 'uk');
+    totals.working_days_in_range = wdRange;
+    const per = n => (wdRange ? Math.round(n / wdRange) : null);
+    totals.per_day = wdRange ? {
+      sales: per(totals.sales), gp: per(totals.gp), orders: per(totals.orders),
+      order_lines: per(totals.order_lines), units: per(totals.units), weight_kg: per(totals.weight_kg)
+    } : null;
     return { rows, totals };
   };
 
@@ -251,7 +330,7 @@ app.get('/api/daily', async (req, res) => {
 
   try {
     const cy = await runOne(startDate, endDate);
-    const scaffolded = scaffoldDays(cy.rows, startDate, endDate);
+    const scaffolded = addRunningTotals(scaffoldDays(cy.rows, startDate, endDate), 'uk');
     const payload = { rows: scaffolded, totals: cy.totals, workingDays: workingDaysTile(endDate, 'uk'), zeroWeekdays: zeroWeekdayFlags(cy.rows, startDate, endDate, 'uk'), startDate, endDate, rep: rep || 'all' };
     if (compare) {
       const pyStart = shiftYear(startDate), pyEnd = shiftYear(endDate);
@@ -328,12 +407,17 @@ app.get('/api/combined', async (req, res) => {
   if (cached) return res.json({ success: true, ...cached, cached: true });
 
   const query = [
-    'WITH uk AS (',
+    'WITH reps AS (',
+    REP_LOOKUP,
+    '),',
+    'uk AS (',
     '  SELECT FORMAT_DATE(\'%Y-%m-%d\', oh.oh_datetime) AS d,',
     '    SUM(' + SIGN + ' * oht.oht_net) AS sales,',
     '    SUM(' + SIGN + ' * oht.oht_total_margin) AS gp',
     '  FROM `' + P + '.fixmart_bi.order_header` oh',
     '  JOIN `' + P + '.fixmart_bi.Order_Header_Total` oht ON oht.oht_oh_id = oh.oh_id',
+    // INNER JOIN: drops internal Fixmart accounts, matching the UK daily board.
+    '  JOIN reps r ON r.cd_id = oh.oh_cd_id',
     '  WHERE oh.oh_datetime BETWEEN @startDate AND @endDate',
     '    AND oh.oh_sot_id IN (' + SOT + ')',
     '  GROUP BY 1',

@@ -40,12 +40,15 @@
   .toggle-btn.active { background: var(--lime); color: var(--black); }
 
   /* SMALL MULTIPLES */
-  .sparks { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 14px; }
+  .sparks { display: grid; grid-template-columns: repeat(auto-fit, minmax(146px, 1fr)); gap: 8px; margin-bottom: 14px; }
   .spark-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
   .spark-title { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); }
   .spark-val { font-family: 'Barlow Condensed', sans-serif; font-size: 22px; font-weight: 800; color: var(--black); line-height: 1.1; margin-top: 2px; }
   .spark-val small { font-size: 12px; font-weight: 600; color: var(--muted); }
-  .spark-svg { width: 100%; height: 46px; display: block; margin-top: 6px; }
+  .spark-sub { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--grey); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .spark-svg { width: 100%; height: 42px; display: block; margin-top: 5px; }
+  .excluded-note { font-size: 11.5px; color: var(--muted); line-height: 1.5; padding: 7px 12px; background: #f0f0ee; border-left: 3px solid var(--grey); border-radius: 4px; margin-bottom: 12px; }
+  .excluded-note strong { color: var(--black); font-family: 'DM Mono', monospace; }
 
   /* TABLE */
   .table-bar { background: var(--black); border-radius: 6px 6px 0 0; padding: 9px 16px; display: flex; align-items: center; justify-content: space-between; }
@@ -70,6 +73,13 @@
   .data-table tfoot td { padding: 9px 12px; font-family: 'DM Mono', monospace; font-weight: 700; color: #fff; font-size: 14px; }
   .data-table tfoot td.right { text-align: right; }
   .data-table tfoot td.lime { color: var(--lime); }
+  .wd-count { font-family: 'Barlow', sans-serif; font-weight: 400; font-size: 11px; color: rgba(255,255,255,0.4); margin-left: 6px; }
+  /* Grouped column bands: Sales | Gross Profit */
+  .data-table thead .grp-row th { background: #e8e8e4; padding: 4px 12px; border-bottom: 1px solid var(--border); }
+  .data-table thead .grp { text-align: center; color: var(--black); font-size: 11px; letter-spacing: 0.12em; }
+  .data-table th.sep, .data-table td.sep { border-left: 2px solid #c8c8c2; }
+  .data-table tfoot td.sep { border-left: 2px solid rgba(255,255,255,0.25); }
+  .data-table td.rt { color: var(--grey); }
 
   .loading { display: flex; align-items: center; justify-content: center; height: 180px; font-size: 13px; color: var(--muted); gap: 10px; }
   .spinner { width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--lime); border-radius: 50%; animation: spin 0.8s linear infinite; }
@@ -143,6 +153,8 @@
   </div>
 
   <div class="sparks" id="sparks"></div>
+
+  <div id="excluded-note" class="excluded-note" style="display:none"></div>
 
   <div id="warnings" class="warn-banner" style="display:none"></div>
 
