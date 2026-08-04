@@ -62,7 +62,7 @@ const cache = new NodeCache({ stdTTL: 900 }); // 15 min; OrderWise loads nightly
 // Manually-recorded KPIs (MSIs, visits, ...) live in a Google Sheet owned by the
 // team, read via the Cloud Run service account. The sheet must be shared with
 // that account as Viewer. Read-only by construction: this app never writes to it.
-const KPI_SHEET_ID = process.env.KPI_SHEET_ID || '1PqCNvSr8SE_pHTessBveOaVhz2XTI3wVbAjsMprJUvQ';
+const KPI_SHEET_ID = process.env.KPI_SHEET_ID || '1PqCNvSr8SE_pHTessBveOaVhz2XTl3wVbAjsMprJUvQ';
 
 // Valid sales order types — matches the OrderWise "Top N Customers by Sales Net"
 // report (10-0028-001). Type 11 is deliberately excluded, as per the report.
