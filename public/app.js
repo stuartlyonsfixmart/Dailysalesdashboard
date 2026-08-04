@@ -152,6 +152,7 @@ function renderTable(rows, totals, zeroDays) {
     const missing = zero.has(r.order_date) ? ' missing-day' : '';
     return `<tr class="${weekend}${missing}">
       <td class="date">${fmtDate(r.order_date)} <span class="dow">${DOW[dow]}</span></td>
+      <td class="right mono dayno">${r.day_no == null ? '' : r.day_no}</td>
       <td class="right mono">${fmtGBP(r.sales)}</td>
       <td class="right mono rt">${fmtGBP(r.sales_rtotal)}</td>
       <td class="right mono">${fmtGBP(r.sales_avg_day)}</td>
@@ -165,10 +166,10 @@ function renderTable(rows, totals, zeroDays) {
   }).join('');
   $('content').innerHTML = `<div class="table-scroll"><table class="data-table">
     <thead>
-      <tr class="grp-row"><th></th>
+      <tr class="grp-row"><th colspan="2"></th>
         <th colspan="6" class="grp">Sales</th>
         <th colspan="4" class="grp sep">Gross Profit</th></tr>
-      <tr><th>Date</th>
+      <tr><th>Date</th><th class="right">Day</th>
         <th class="right">Actual</th><th class="right">R/Total</th><th class="right">Ave/Day</th>
         <th class="right">Av Ord Val</th><th class="right">Orders</th><th class="right">Lines</th>
         <th class="right sep">Actual</th><th class="right">R/Total</th><th class="right">Ave/Day</th>
@@ -176,7 +177,8 @@ function renderTable(rows, totals, zeroDays) {
     </thead>
     <tbody>${body}</tbody>
     <tfoot><tr class="total-row">
-      <td>Total <span class="wd-count">${fmtInt(totals.working_days_in_range)} working days</span></td>
+      <td>Total</td>
+      <td class="right">${fmtInt(totals.working_days_in_range)}</td>
       <td class="right lime">${fmtGBP(totals.sales)}</td><td class="right lime">${fmtGBP(totals.sales)}</td>
       <td class="right">${fmtGBP(pd.sales)}</td><td class="right">${fmtGBP(totals.aov)}</td>
       <td class="right">${fmtInt(totals.orders)}</td><td class="right">${fmtInt(totals.order_lines)}</td>
@@ -190,6 +192,7 @@ async function load() {
   if (!from || !to) return;
   $('content').innerHTML = '<div class="loading"><div class="spinner"></div> Loading from BigQuery…</div>';
   $('table-count').textContent = 'Loading…';
+  loadKpis(from, to); // independent fetch; sheet slowness never blocks the sales table
   try {
     const r = await fetch(`/api/daily?startDate=${from}&endDate=${to}&rep=${encodeURIComponent(rep)}`);
     const j = await r.json();
@@ -202,6 +205,83 @@ async function load() {
     $('content').innerHTML = `<div class="err">Error: ${e.message}</div>`;
     $('table-count').textContent = 'Error';
   }
+}
+
+// ── KPI tracker (manual entry, Google Sheet) ──────────────────────────────────
+// Company-level, so the sales-rep filter deliberately does not apply here.
+function fmtByUnit(v, unit) {
+  if (v == null) return '—';
+  if (unit === 'currency') return fmtGBP(v);
+  if (unit === 'percent') return fmtPct(v);
+  return fmtInt(v);
+}
+
+async function loadKpis(from, to) {
+  const note = $('kpi-note'), content = $('kpi-content'), count = $('kpi-count');
+  if (!content) return;
+  try {
+    const r = await fetch(`/api/kpis?startDate=${from}&endDate=${to}`);
+    const j = await r.json();
+    if (!j.success) throw new Error(j.error || 'KPI query failed');
+    if (!j.available) {
+      // Misconfiguration is shown quietly rather than hidden, so whoever set the
+      // sheet up can see exactly what is missing (usually the share).
+      note.textContent = 'KPI tracker not connected: ' + (j.reason || 'unknown');
+      note.style.display = 'block';
+      content.innerHTML = '';
+      count.textContent = 'not connected';
+      return;
+    }
+    note.style.display = 'none';
+    renderKpiTable(j);
+    count.textContent = `${j.kpis.length} KPIs · ${j.workingDays} working days · from Google Sheet`;
+  } catch (e) {
+    note.textContent = 'KPI tracker not available: ' + e.message;
+    note.style.display = 'block';
+    content.innerHTML = '';
+    count.textContent = 'error';
+  }
+}
+
+function renderKpiTable(j) {
+  const { kpis, rows, totals } = j;
+  if (!kpis.length) {
+    $('kpi-content').innerHTML = '<div class="err">No KPIs are active for this period. Add them on the KPIs tab of the tracker sheet.</div>';
+    return;
+  }
+  const grpHead = kpis.map((k, i) =>
+    `<th colspan="4" class="grp${i === 0 ? ' sep' : ' sep'}">${k.name}</th>`).join('');
+  const subHead = kpis.map(() =>
+    `<th class="right sep">Actual</th><th class="right">R/Total</th><th class="right">R/Target</th><th class="right">Ave/Day</th>`).join('');
+  const body = rows.map(r => {
+    const dow = new Date(r.order_date + 'T00:00:00').getDay();
+    const weekend = (dow === 0 || dow === 6) ? ' class="weekend"' : '';
+    const cells = kpis.map(k => {
+      const c = r.cells[k.key] || {};
+      return `<td class="right mono sep">${fmtByUnit(c.v, k.unit)}</td>
+        <td class="right mono rt">${fmtByUnit(c.rtotal, k.unit)}</td>
+        <td class="right mono rt">${fmtByUnit(c.rtarget, k.unit)}</td>
+        <td class="right mono">${fmtByUnit(c.aveday, k.unit)}</td>`;
+    }).join('');
+    return `<tr${weekend}>
+      <td class="date">${fmtDate(r.order_date)} <span class="dow">${DOW[dow]}</span></td>
+      <td class="right mono dayno">${r.day_no == null ? '' : r.day_no}</td>${cells}</tr>`;
+  }).join('');
+  const totCells = kpis.map(k => {
+    const t = totals[k.key] || {};
+    return `<td class="right lime sep">${fmtByUnit(t.total, k.unit)}</td>
+      <td class="right lime">${fmtByUnit(t.total, k.unit)}</td>
+      <td class="right">${fmtByUnit(t.rtarget, k.unit)}</td>
+      <td class="right">${fmtByUnit(t.aveday, k.unit)}</td>`;
+  }).join('');
+  $('kpi-content').innerHTML = `<div class="table-scroll"><table class="data-table">
+    <thead>
+      <tr class="grp-row"><th colspan="2"></th>${grpHead}</tr>
+      <tr><th>Date</th><th class="right">Day</th>${subHead}</tr>
+    </thead>
+    <tbody>${body}</tbody>
+    <tfoot><tr class="total-row"><td>Total</td><td class="right">${fmtInt(j.workingDays)}</td>${totCells}</tr></tfoot>
+  </table></div>`;
 }
 
 async function loadReps() {
