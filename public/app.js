@@ -152,29 +152,37 @@ function renderTable(rows, totals, zeroDays) {
     const missing = zero.has(r.order_date) ? ' missing-day' : '';
     return `<tr class="${weekend}${missing}">
       <td class="date">${fmtDate(r.order_date)} <span class="dow">${DOW[dow]}</span></td>
+      <td class="right mono">${fmtGBP(r.sales)}</td>
+      <td class="right mono rt">${fmtGBP(r.sales_rtotal)}</td>
+      <td class="right mono">${fmtGBP(r.sales_avg_day)}</td>
+      <td class="right mono">${fmtGBP(r.aov)}</td>
       <td class="right mono">${fmtInt(r.orders)}</td>
       <td class="right mono">${fmtInt(r.order_lines)}</td>
-      <td class="right mono">${fmtInt(r.units)}</td>
-      <td class="right mono">${fmtInt(r.weight_kg)}</td>
-      <td class="right mono">${fmtGBP(r.sales)}</td>
-      <td class="right mono">${fmtGBP(r.gp)}</td>
+      <td class="right mono sep">${fmtGBP(r.gp)}</td>
+      <td class="right mono rt">${fmtGBP(r.gp_rtotal)}</td>
+      <td class="right mono">${fmtGBP(r.gp_avg_day)}</td>
       <td class="right mono">${fmtPct(r.gp_pct)}</td></tr>`;
   }).join('');
   $('content').innerHTML = `<div class="table-scroll"><table class="data-table">
-    <thead><tr><th>Date</th><th class="right">Orders</th><th class="right">Order Lines</th>
-      <th class="right">Units</th><th class="right">Weight kg</th><th class="right">Sales</th>
-      <th class="right">GP</th><th class="right">GP %</th></tr></thead>
+    <thead>
+      <tr class="grp-row"><th></th>
+        <th colspan="6" class="grp">Sales</th>
+        <th colspan="4" class="grp sep">Gross Profit</th></tr>
+      <tr><th>Date</th>
+        <th class="right">Actual</th><th class="right">R/Total</th><th class="right">Ave/Day</th>
+        <th class="right">Av Ord Val</th><th class="right">Orders</th><th class="right">Lines</th>
+        <th class="right sep">Actual</th><th class="right">R/Total</th><th class="right">Ave/Day</th>
+        <th class="right">GP %</th></tr>
+    </thead>
     <tbody>${body}</tbody>
-    <tfoot><tr class="total-row"><td>Total</td>
+    <tfoot><tr class="total-row">
+      <td>Total <span class="wd-count">${fmtInt(totals.working_days_in_range)} working days</span></td>
+      <td class="right lime">${fmtGBP(totals.sales)}</td><td class="right lime">${fmtGBP(totals.sales)}</td>
+      <td class="right">${fmtGBP(pd.sales)}</td><td class="right">${fmtGBP(totals.aov)}</td>
       <td class="right">${fmtInt(totals.orders)}</td><td class="right">${fmtInt(totals.order_lines)}</td>
-      <td class="right">${fmtInt(totals.units)}</td><td class="right">${fmtInt(totals.weight_kg)}</td>
-      <td class="right lime">${fmtGBP(totals.sales)}</td><td class="right lime">${fmtGBP(totals.gp)}</td>
-      <td class="right lime">${fmtPct(totals.gp_pct)}</td></tr>
-    <tr class="avg-row"><td>Average per working day <span class="wd-count">${fmtInt(totals.working_days_in_range)} days</span></td>
-      <td class="right">${fmtInt(pd.orders)}</td><td class="right">${fmtInt(pd.order_lines)}</td>
-      <td class="right">${fmtInt(pd.units)}</td><td class="right">${fmtInt(pd.weight_kg)}</td>
-      <td class="right">${fmtGBP(pd.sales)}</td><td class="right">${fmtGBP(pd.gp)}</td>
-      <td class="right">${fmtPct(totals.gp_pct)}</td></tr></tfoot></table></div>`;
+      <td class="right lime sep">${fmtGBP(totals.gp)}</td><td class="right lime">${fmtGBP(totals.gp)}</td>
+      <td class="right">${fmtGBP(pd.gp)}</td>
+      <td class="right lime">${fmtPct(totals.gp_pct)}</td></tr></tfoot></table></div>`;
 }
 
 async function load() {
