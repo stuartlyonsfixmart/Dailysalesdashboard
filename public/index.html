@@ -73,9 +73,13 @@
   .data-table tfoot td { padding: 9px 12px; font-family: 'DM Mono', monospace; font-weight: 700; color: #fff; font-size: 14px; }
   .data-table tfoot td.right { text-align: right; }
   .data-table tfoot td.lime { color: var(--lime); }
-  .data-table tfoot .avg-row { background: #2a2a2a; }
-  .data-table tfoot .avg-row td { font-weight: 500; color: rgba(255,255,255,0.72); font-size: 13px; padding: 7px 12px; }
   .wd-count { font-family: 'Barlow', sans-serif; font-weight: 400; font-size: 11px; color: rgba(255,255,255,0.4); margin-left: 6px; }
+  /* Grouped column bands: Sales | Gross Profit */
+  .data-table thead .grp-row th { background: #e8e8e4; padding: 4px 12px; border-bottom: 1px solid var(--border); }
+  .data-table thead .grp { text-align: center; color: var(--black); font-size: 11px; letter-spacing: 0.12em; }
+  .data-table th.sep, .data-table td.sep { border-left: 2px solid #c8c8c2; }
+  .data-table tfoot td.sep { border-left: 2px solid rgba(255,255,255,0.25); }
+  .data-table td.rt { color: var(--grey); }
 
   .loading { display: flex; align-items: center; justify-content: center; height: 180px; font-size: 13px; color: var(--muted); gap: 10px; }
   .spinner { width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--lime); border-radius: 50%; animation: spin 0.8s linear infinite; }
