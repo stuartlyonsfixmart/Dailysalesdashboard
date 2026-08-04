@@ -152,6 +152,31 @@ function scaffoldDays(rows, startDate, endDate) {
   return out;
 }
 
+// Running totals and cumulative averages, matching the finance sheet's layout.
+// Ave/Day is the running total divided by working days elapsed so far, not a
+// rolling window: on day one it equals that day, by month end it equals the
+// period average. Weekend rows carry the running total forward without
+// incrementing the day count, so a Saturday order cannot dilute the average.
+// Av Ord Val is that day's own sales over that day's own orders.
+function addRunningTotals(rows, country) {
+  const hol = HOLIDAYS[country] || HOLIDAYS.uk;
+  let cumSales = 0, cumGp = 0, wd = 0;
+  return rows.map(r => {
+    cumSales += Number(r.sales) || 0;
+    cumGp += Number(r.gp) || 0;
+    const dow = new Date(r.order_date + 'T00:00:00').getDay();
+    if (dow !== 0 && dow !== 6 && !hol.has(r.order_date)) wd++;
+    const orders = Number(r.orders) || 0;
+    return Object.assign({}, r, {
+      sales_rtotal: Math.round(cumSales),
+      gp_rtotal: Math.round(cumGp),
+      sales_avg_day: wd ? Math.round(cumSales / wd) : null,
+      gp_avg_day: wd ? Math.round(cumGp / wd) : null,
+      aov: orders ? Math.round((Number(r.sales) || 0) / orders) : null
+    });
+  });
+}
+
 // Zero-fill weekdays for the combined board (UK/DE/combined split shape).
 function scaffoldCombined(rows, startDate, endDate) {
   const byDate = new Map(rows.map(r => [r.order_date, r]));
@@ -305,7 +330,7 @@ app.get('/api/daily', async (req, res) => {
 
   try {
     const cy = await runOne(startDate, endDate);
-    const scaffolded = scaffoldDays(cy.rows, startDate, endDate);
+    const scaffolded = addRunningTotals(scaffoldDays(cy.rows, startDate, endDate), 'uk');
     const payload = { rows: scaffolded, totals: cy.totals, workingDays: workingDaysTile(endDate, 'uk'), zeroWeekdays: zeroWeekdayFlags(cy.rows, startDate, endDate, 'uk'), startDate, endDate, rep: rep || 'all' };
     if (compare) {
       const pyStart = shiftYear(startDate), pyEnd = shiftYear(endDate);
